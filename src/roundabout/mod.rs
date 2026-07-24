@@ -7,3 +7,4 @@ pub mod priority;
 pub mod heatmap;
 pub mod scratchpad;
 pub mod index;
+pub mod grid;

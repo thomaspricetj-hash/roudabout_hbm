@@ -590,3 +590,23 @@ multilayer architectural extraction
 
 This clause closes all layer‑based loopholes.
 
+
+
+All upgrades, enhancements, optimizations, algorithms, subsystems, architectures, designs, and technical improvements created by the author — including but not limited to multilayer routing engines, heatmap systems, grid‑bias models, reinforcement memory, priority logic, arbitration schemes, parallel scoring engines, cognitive routing behaviors, controller logic, and any MAX‑tier performance improvements — are the exclusive intellectual property of the author.
+
+
+
+No party is permitted to copy, reproduce, modify, distribute, sublicense, reverse‑engineer, emulate, or derive any portion of these upgrades, in whole or in part, without explicit written permission from the author.
+
+
+
+All rights to present, future, and derivative versions of these upgrades — including conceptual designs, implementation details, structural patterns, and emergent behaviors — are fully reserved. Any attempt to replicate, simulate, or approximate these systems or their functionality is strictly prohibited unless expressly authorized.
+
+
+
+These protections apply universally to all versions, updates, patches, extensions, rewrites, and successor systems, regardless of delivery method, integration context, or underlying hardware.
+
+
+
+Unauthorized use constitutes a violation of this license and may result in immediate termination of all granted rights.
+

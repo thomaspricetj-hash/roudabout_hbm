@@ -5,16 +5,19 @@ use crate::roundabout::{
 };
 
 pub fn run_simulation() {
-    // Build channels (unchanged logic)
+    // Multilayer engine uses 4 layers (same as controller + request)
+    let layer_count = 4;
+
+    // Build channels (unchanged logic, just fixed constructor)
     let channels = vec![
-        HbmChannel::new(0, 16, 0.9),
-        HbmChannel::new(1, 16, 0.9),
-        HbmChannel::new(2, 16, 0.9),
-        HbmChannel::new(3, 16, 0.9),
+        HbmChannel::new(0, 16, 0.9, layer_count),
+        HbmChannel::new(1, 16, 0.9, layer_count),
+        HbmChannel::new(2, 16, 0.9, layer_count),
+        HbmChannel::new(3, 16, 0.9, layer_count),
     ];
 
     // MAX‑tier controller (parallel routing)
-    let mut ctrl = HbmRoundaboutController::new(channels, 4, 0.85);
+    let mut ctrl = HbmRoundaboutController::new(channels, layer_count, 0.85);
 
     // Request (no logic removed)
     let req = HbmRequest::new(
@@ -24,12 +27,11 @@ pub fn run_simulation() {
         0x1234,
         RequestPriority::Standard,
         RequestKind::Load,
-        4,
+        layer_count,
     );
 
     // Simulation loop
     for _ in 0..10 {
-        // Parallel routing inside controller
         if let Some(ch) = ctrl.route_request(req.clone()) {
             println!("Request {} exited via channel {}", req.id, ch);
             break;

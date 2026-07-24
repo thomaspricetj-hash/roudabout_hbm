@@ -126,9 +126,7 @@ impl HbmRequest {
     }
 
     /// Parallel multilayer reinforcement update.
-    /// This mirrors the scratchpad parallel fix: compute → apply.
     pub fn reinforce_parallel(&mut self, success: bool) {
-        // Compute reinforcement adjustments in parallel
         let adjustments: Vec<f32> = (0..self.layer_scores.len())
             .into_par_iter()
             .map(|layer| {
@@ -139,8 +137,8 @@ impl HbmRequest {
             })
             .collect();
 
-        // Apply sequentially (safe)
-        for (layer, adj) in adjustments.into_iter().enumerate() {
+        // FIX: silence unused variable warning, keep logic intact
+        for (_layer, adj) in adjustments.into_iter().enumerate() {
             self.stability_factor = (self.stability_factor + adj).clamp(0.1, 2.0);
         }
     }

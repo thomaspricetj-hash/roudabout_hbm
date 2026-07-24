@@ -6,10 +6,11 @@ use super::{
     metrics::ChannelMetrics,
     heatmap::Heatmap,
     index::RoutingIndex,
+    grid::CrossConnectGrid,
 };
 
 /// PriorityEngine computes multilayer priority weights for HBM requests.
-/// MAX‑tier version: parallel multilayer scoring, heatmap bias, index bias.
+/// MAX‑tier version: parallel multilayer scoring, heatmap bias, grid bias, index bias.
 #[derive(Debug, Default)]
 pub struct PriorityEngine;
 
@@ -56,12 +57,12 @@ impl PriorityEngine {
         0.0
     }
 
-    /// Parallel multilayer priority scoring
+    /// MAX‑tier parallel multilayer priority scoring (heat + grid + index + metrics)
     pub fn composite_priority_parallel(
         req: &HbmRequest,
         channel: &HbmChannel,
         heatmap: &Heatmap,
-        channels: &[HbmChannel],
+        ccg: &CrossConnectGrid,
         layer_count: usize,
     ) -> f32 {
         let base = Self::base_priority_weight(req.priority);
@@ -70,6 +71,7 @@ impl PriorityEngine {
         let layer_bias_sum: f32 = (0..layer_count)
             .into_par_iter()
             .map(|layer| {
+                // Request bias
                 let req_bias = Self::multilayer_request_bias(req, layer);
 
                 // Heatmap bias
@@ -83,16 +85,33 @@ impl PriorityEngine {
                     }
                 }).unwrap_or(0.0);
 
-                // Index bias (channel scoring)
-                let idx_bias = RoutingIndex::score_channel(req, channel, layer_count) * 0.02;
+                // Grid bias (cluster + zone + door + geom)
+                let grid_bias =
+                    0.35 * ccg.cluster_bias[layer][channel.id] +
+                    0.25 * ccg.zone_bias[layer][channel.id] +
+                    0.20 * ccg.door_bias[layer][channel.id] +
+                    0.20 * ccg.geom_bias[layer][channel.id];
 
-                req_bias + heat_bias + idx_bias
+                // Index bias (multilayer fused index scoring)
+                let idx_bias = RoutingIndex::score_channel_parallel_with_grid(
+                    req,
+                    channel,
+                    heatmap,
+                    ccg,
+                    layer_count,
+                ) * 0.02;
+
+                req_bias + heat_bias - grid_bias + idx_bias
             })
             .sum();
 
+        // Channel‑level bias
         let channel_bias = Self::channel_bias(&channel.metrics);
+
+        // Bank‑busy bias
         let bank_bias = Self::bank_bias(channel, req.bank_id);
 
+        // Composite score
         let mut score = base + layer_bias_sum + channel_bias + bank_bias;
 
         // Reinforcement learning: stable requests get lower priority weight
@@ -134,3 +153,4 @@ impl PriorityEngine {
         req.stability_factor *= 0.95;
     }
 }
+

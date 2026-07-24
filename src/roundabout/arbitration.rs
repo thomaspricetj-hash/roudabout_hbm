@@ -5,6 +5,7 @@ use super::{
     channel::HbmChannel,
     heatmap::Heatmap,
     index::RoutingIndex,
+    grid::CrossConnectGrid,
 };
 
 #[derive(Debug, Default)]
@@ -33,20 +34,22 @@ impl ArbitrationEngine {
         req: &HbmRequest,
         channel: &HbmChannel,
         heatmap: &Heatmap,
+        ccg: &CrossConnectGrid,
         layer_count: usize,
     ) -> f32 {
         // Priority weight
         let priority = Self::priority_weight(req);
 
-        // Parallel multilayer index scoring
-        let index_score = RoutingIndex::score_channel_parallel(
+        // Parallel multilayer index scoring (heat + grid + metrics)
+        let index_score = RoutingIndex::score_channel_parallel_with_grid(
             req,
             channel,
             heatmap,
+            ccg,
             layer_count,
         );
 
-        // Channel‑metric contribution
+        // Channel‑metric contribution (legacy + multilayer)
         let metrics_score =
             (channel.metrics.load * 0.20)
             + (channel.metrics.refresh_pressure * 0.30)
@@ -63,8 +66,11 @@ impl ArbitrationEngine {
             .map(|layer| layer.get(channel.id).copied().unwrap_or(0.0))
             .sum::<f32>();
 
+        // Grid fused bias (cluster + zone + door + geom)
+        let grid_bias = ccg.fused_bias(channel.id);
+
         // Composite arbitration score
-        priority + index_score + metrics_score + bank_busy_score + heat_affinity
+        priority + index_score + metrics_score + bank_busy_score + heat_affinity - grid_bias
     }
 
     /// Parallel arbitration across all channels
@@ -73,6 +79,7 @@ impl ArbitrationEngine {
         req: &HbmRequest,
         channels: &[HbmChannel],
         heatmap: &Heatmap,
+        ccg: &CrossConnectGrid,
         layer_count: usize,
     ) -> Option<usize> {
         channels
@@ -86,6 +93,7 @@ impl ArbitrationEngine {
                     req,
                     ch,
                     heatmap,
+                    ccg,
                     layer_count,
                 );
 
@@ -95,3 +103,4 @@ impl ArbitrationEngine {
             .map(|(id, _)| id)
     }
 }
+

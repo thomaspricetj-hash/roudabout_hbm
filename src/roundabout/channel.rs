@@ -20,7 +20,7 @@ pub struct HbmChannel {
 }
 
 impl HbmChannel {
-    pub fn new(id: usize, bank_count: usize, max_load: f32) -> Self {
+    pub fn new(id: usize, bank_count: usize, max_load: f32, layer_count: usize) -> Self {
         let banks = (0..bank_count)
             .map(|b| BankState {
                 bank_id: b,
@@ -32,7 +32,7 @@ impl HbmChannel {
         Self {
             id,
             banks,
-            metrics: ChannelMetrics::new(),
+            metrics: ChannelMetrics::new(layer_count),
             max_load,
             heat_affinity: 0.0,
             reliability_score: 1.0,
@@ -87,7 +87,6 @@ impl HbmChannel {
         let jitter = self.metrics.jitter_cycles;
         let err = self.metrics.error_rate;
 
-        // Compute reliability drop in parallel
         let drop = [ecc, jitter, err]
             .par_iter()
             .map(|v| v * 0.10)
@@ -98,7 +97,6 @@ impl HbmChannel {
 
     /// Parallel heat affinity update based on heatmap layer values
     pub fn update_heat_affinity_parallel(&mut self, heat_layers: &[Vec<f32>]) {
-        // Average heat across all layers for this channel
         let affinity = heat_layers
             .par_iter()
             .map(|layer| layer.get(self.id).copied().unwrap_or(0.0))
@@ -131,3 +129,4 @@ impl HbmChannel {
         bank_busy + row_affinity + heat_affinity + metrics_score
     }
 }
+
