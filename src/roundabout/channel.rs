@@ -17,6 +17,11 @@ pub struct HbmChannel {
 
     pub heat_affinity: f32,
     pub reliability_score: f32,
+
+    // NEW: tunneling fields
+    pub is_tunnel: bool,
+    pub tunnel_bias: f32,
+    pub tunnel_reliability: f32,
 }
 
 impl HbmChannel {
@@ -36,19 +41,122 @@ impl HbmChannel {
             max_load,
             heat_affinity: 0.0,
             reliability_score: 1.0,
+
+            // tunneling defaults
+            is_tunnel: false,
+            tunnel_bias: 0.0,
+            tunnel_reliability: 1.0,
         }
     }
 
-    /// Original acceptance logic (kept intact)
+    /// Attach tunneling characteristics to this channel (HBM tunnel path).
+    pub fn attach_tunnel(
+        &mut self,
+        latency_ms: f32,
+        jitter_ms: f32,
+        loss_rate: f32,
+        stability: f32,
+        congestion: f32,
+    ) {
+        self.is_tunnel = true;
+
+        self.metrics.tunnel_latency_ms = latency_ms;
+        self.metrics.tunnel_jitter_ms = jitter_ms;
+        self.metrics.tunnel_loss_rate = loss_rate;
+        self.metrics.tunnel_stability_score = stability;
+        self.metrics.tunnel_congestion_level = congestion;
+
+        self.tunnel_reliability = stability;
+
+        // Initial tunnel bias: favor stable, low‑loss, low‑congestion tunnels
+        self.tunnel_bias =
+            (1.0 - loss_rate) * 0.20
+            - (congestion * 0.10)
+            + (stability * 0.20)
+            - (latency_ms / 100.0) * 0.05
+            - (jitter_ms / 100.0) * 0.05;
+    }
+
+    /// Update tunnel metrics over time (e.g., from telemetry).
+    pub fn update_tunnel_metrics(
+        &mut self,
+        latency_ms: f32,
+        jitter_ms: f32,
+        loss_rate: f32,
+        stability: f32,
+        congestion: f32,
+    ) {
+        if !self.is_tunnel {
+            return;
+        }
+
+        self.metrics.tunnel_latency_ms = latency_ms;
+        self.metrics.tunnel_jitter_ms = jitter_ms;
+        self.metrics.tunnel_loss_rate = loss_rate;
+        self.metrics.tunnel_stability_score = stability;
+        self.metrics.tunnel_congestion_level = congestion;
+
+        self.tunnel_reliability = stability;
+
+        self.tunnel_bias =
+            (1.0 - loss_rate) * 0.20
+            - (congestion * 0.10)
+            + (stability * 0.20)
+            - (latency_ms / 100.0) * 0.05
+            - (jitter_ms / 100.0) * 0.05;
+    }
+
+    /// Reinforce tunnel reliability after successful routing.
+    pub fn reinforce_tunnel(&mut self) {
+        if !self.is_tunnel {
+            return;
+        }
+
+        self.tunnel_reliability = (self.tunnel_reliability + 0.03).clamp(0.1, 2.0);
+        self.metrics.tunnel_stability_score =
+            (self.metrics.tunnel_stability_score + 0.03).clamp(0.1, 2.0);
+
+        self.tunnel_bias += 0.02;
+    }
+
+    /// Cool tunnel bias after failure or congestion.
+    pub fn cool_tunnel(&mut self) {
+        if !self.is_tunnel {
+            return;
+        }
+
+        self.tunnel_reliability = (self.tunnel_reliability - 0.03).clamp(0.1, 2.0);
+        self.metrics.tunnel_stability_score =
+            (self.metrics.tunnel_stability_score - 0.03).clamp(0.1, 2.0);
+
+        self.tunnel_bias -= 0.02;
+    }
+
+    /// Original acceptance logic + tunnel‑aware constraints.
     pub fn can_accept(&self, bank_id: usize) -> bool {
         if self.metrics.load >= self.max_load {
             return false;
         }
+
         if let Some(bank) = self.banks.iter().find(|b| b.bank_id == bank_id) {
-            !bank.busy
+            if bank.busy {
+                return false;
+            }
         } else {
-            false
+            return false;
         }
+
+        // Tunnel‑specific acceptance rules
+        if self.is_tunnel {
+            if self.metrics.tunnel_congestion_level >= 0.95 {
+                return false;
+            }
+            if self.metrics.tunnel_loss_rate >= 0.10 {
+                return false;
+            }
+        }
+
+        true
     }
 
     // -------------------------------------------------------------------------
@@ -126,7 +234,25 @@ impl HbmChannel {
             + (self.metrics.jitter_cycles * 0.10)
             + ((1.0 - self.metrics.stability_score) * 0.20);
 
-        bank_busy + row_affinity + heat_affinity + metrics_score
+        // NEW: tunneling contribution
+        let tunnel_score = if self.is_tunnel {
+            let mut score = 0.0;
+
+            score += (self.metrics.tunnel_latency_ms / 100.0) * 0.10;
+            score += (self.metrics.tunnel_jitter_ms / 100.0) * 0.10;
+            score += self.metrics.tunnel_congestion_level * 0.15;
+            score += (1.0 - self.metrics.tunnel_stability_score) * 0.20;
+            score -= (1.0 - self.metrics.tunnel_loss_rate) * 0.10;
+
+            score += self.tunnel_bias * 0.10;
+            score += (1.0 - self.tunnel_reliability) * 0.15;
+
+            score
+        } else {
+            0.0
+        };
+
+        bank_busy + row_affinity + heat_affinity + metrics_score + tunnel_score
     }
 }
 

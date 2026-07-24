@@ -25,12 +25,10 @@ pub struct HbmRequest {
     pub bank_id: usize,
     pub row_addr: u64,
 
-    // Core timing
     pub created_at: Instant,
     pub last_attempt: Instant,
     pub circulations: u32,
 
-    // Multilayer routing state
     pub last_exit_channel: Option<usize>,
     pub heat_signature: f32,
     pub route_score: f32,
@@ -43,6 +41,12 @@ pub struct HbmRequest {
 
     pub adaptive_weight: f32,
     pub stability_factor: f32,
+
+    pub is_tunnel_escalated: bool,
+    pub tunnel_preference: f32,
+    pub tunnel_history: Vec<Option<usize>>,
+    pub tunnel_heat: f32,
+    pub tunnel_score: f32,
 }
 
 impl HbmRequest {
@@ -70,12 +74,20 @@ impl HbmRequest {
             heat_signature: 0.0,
             route_score: 0.0,
             escalations: 0,
+
             layer_scores: vec![0.0; layers],
             layer_heat: vec![0.0; layers],
             layer_bias: vec![0.0; layers],
             layer_exit_history: vec![None; layers],
+
             adaptive_weight: 1.0,
             stability_factor: 1.0,
+
+            is_tunnel_escalated: false,
+            tunnel_preference: 0.0,
+            tunnel_history: vec![None; layers],
+            tunnel_heat: 0.0,
+            tunnel_score: 0.0,
         }
     }
 
@@ -85,8 +97,30 @@ impl HbmRequest {
             RequestPriority::Standard => RequestPriority::High,
             RequestPriority::Low => RequestPriority::Standard,
         };
+
         self.escalations += 1;
         self.adaptive_weight *= 1.1;
+
+        self.is_tunnel_escalated = true;
+        self.tunnel_preference += 0.05;
+    }
+
+    pub fn reinforce_tunnel(&mut self, success: bool) {
+        let delta = if success { 0.04 } else { -0.04 };
+
+        self.tunnel_preference = (self.tunnel_preference + delta).clamp(-1.0, 2.0);
+        self.stability_factor = (self.stability_factor + delta).clamp(0.1, 2.0);
+        self.tunnel_heat = (self.tunnel_heat + delta).clamp(0.0, 5.0);
+    }
+
+    pub fn update_tunnel_score(&mut self, score: f32) {
+        self.tunnel_score = score;
+    }
+
+    pub fn update_tunnel_exit(&mut self, layer: usize, exit_id: Option<usize>) {
+        if layer < self.tunnel_history.len() {
+            self.tunnel_history[layer] = exit_id;
+        }
     }
 
     pub fn update_route_score(&mut self, score: f32) {
@@ -125,7 +159,6 @@ impl HbmRequest {
         }
     }
 
-    /// Parallel multilayer reinforcement update.
     pub fn reinforce_parallel(&mut self, success: bool) {
         let adjustments: Vec<f32> = (0..self.layer_scores.len())
             .into_par_iter()
@@ -137,8 +170,7 @@ impl HbmRequest {
             })
             .collect();
 
-        // FIX: silence unused variable warning, keep logic intact
-        for (_layer, adj) in adjustments.into_iter().enumerate() {
+        for adj in adjustments {
             self.stability_factor = (self.stability_factor + adj).clamp(0.1, 2.0);
         }
     }

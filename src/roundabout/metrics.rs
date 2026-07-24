@@ -8,7 +8,6 @@ use super::{
     grid::CrossConnectGrid,
 };
 
-
 #[derive(Debug, Clone)]
 pub struct ChannelMetrics {
     // Core metrics (legacy)
@@ -30,6 +29,16 @@ pub struct ChannelMetrics {
 
     // NEW: multilayer scratchpad
     pub scratch: Vec<f32>,
+
+    // NEW: tunneling metrics
+    pub tunnel_latency_ms: f32,
+    pub tunnel_jitter_ms: f32,
+    pub tunnel_loss_rate: f32,
+    pub tunnel_stability_score: f32,
+    pub tunnel_congestion_level: f32,
+
+    // NEW: tunneling multilayer bias
+    pub tunnel_bias: f32,
 }
 
 impl ChannelMetrics {
@@ -51,10 +60,18 @@ impl ChannelMetrics {
             layer_stability: vec![1.0; layer_count],
 
             scratch: vec![0.0; layer_count],
+
+            // tunneling defaults
+            tunnel_latency_ms: 0.0,
+            tunnel_jitter_ms: 0.0,
+            tunnel_loss_rate: 0.0,
+            tunnel_stability_score: 1.0,
+            tunnel_congestion_level: 0.0,
+            tunnel_bias: 0.0,
         }
     }
 
-    /// MAX‑tier: multilayer parallel metric scoring (Heatmap + Grid + Metrics)
+    /// MAX‑tier: multilayer parallel metric scoring (Heatmap + Grid + Metrics + Tunneling)
     pub fn multilayer_score_parallel(
         &self,
         req: &HbmRequest,
@@ -92,7 +109,25 @@ impl ChannelMetrics {
                 // Rotating door bias
                 let door_rot = ccg.door_rotation[layer][channel.id] as f32 * 0.01;
 
-                base + req_bias + heat + scratch + door_rot - grid_bias
+                // NEW: tunneling contribution
+                let tunnel_score = if channel.is_tunnel {
+                    let mut score = 0.0;
+
+                    score += (self.tunnel_latency_ms / 100.0) * 0.10;
+                    score += (self.tunnel_jitter_ms / 100.0) * 0.10;
+                    score += self.tunnel_congestion_level * 0.15;
+                    score += (1.0 - self.tunnel_stability_score) * 0.20;
+                    score -= (1.0 - self.tunnel_loss_rate) * 0.10;
+
+                    // multilayer tunnel bias
+                    score += self.tunnel_bias * 0.10;
+
+                    score
+                } else {
+                    0.0
+                };
+
+                base + req_bias + heat + scratch + door_rot - grid_bias + tunnel_score
             })
             .sum()
     }
@@ -106,6 +141,9 @@ impl ChannelMetrics {
         self.layer_stability
             .iter_mut()
             .for_each(|s| *s = (*s + delta).clamp(0.1, 2.0));
+
+        // NEW: tunnel stability reinforcement
+        self.tunnel_stability_score = (self.tunnel_stability_score + delta).clamp(0.1, 2.0);
     }
 
     /// MAX‑tier: refresh pressure update (multilayer)
@@ -142,6 +180,9 @@ impl ChannelMetrics {
         self.layer_jitter
             .iter_mut()
             .for_each(|v| *v = j);
+
+        // NEW: tunnel jitter update
+        self.tunnel_jitter_ms = j * 100.0;
     }
 
     /// MAX‑tier: throughput update (multilayer)
@@ -153,5 +194,9 @@ impl ChannelMetrics {
         self.layer_load
             .iter_mut()
             .for_each(|l| *l += t * 0.01);
+
+        // NEW: tunnel congestion update
+        self.tunnel_congestion_level = (t * 0.02).min(1.0);
     }
 }
+

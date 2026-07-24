@@ -31,7 +31,7 @@ impl HbmRoundaboutController {
         }
     }
 
-    /// MAX‑tier parallel routing + multilayer Cross‑Connect Grid
+    /// MAX‑tier parallel routing + multilayer Cross‑Connect Grid + tunneling
     pub fn route_request(&mut self, mut req: HbmRequest) -> Option<usize> {
         // multilayer heatmap decay
         self.heatmap.decay_step();
@@ -56,7 +56,30 @@ impl HbmRoundaboutController {
                 // fused multilayer grid bias
                 let fused_bias = self.ccg.fused_bias(ch.id);
 
-                let final_score = base_score - fused_bias;
+                // NEW: tunnel scoring
+                let tunnel_score = if ch.is_tunnel {
+                    let tm = &ch.metrics;
+
+
+                    let mut score = 0.0;
+
+                    score += (tm.tunnel_latency_ms / 100.0) * 0.10;
+                    score += (tm.tunnel_jitter_ms / 100.0) * 0.10;
+                    score += tm.tunnel_congestion_level * 0.15;
+                    score += (1.0 - tm.tunnel_stability_score) * 0.20;
+                    score -= (1.0 - tm.tunnel_loss_rate) * 0.10;
+
+                    // tunnel bias + topology bias blending
+                    score += ch.tunnel_bias * 0.10;
+                    score += (1.0 - ch.tunnel_reliability) * 0.15;
+                    score += fused_bias * 0.10;
+
+                    Some(score)
+                } else {
+                    Some(0.0)
+                }?;
+
+                let final_score = base_score - fused_bias + tunnel_score;
 
                 Some((ch.id, final_score))
             })
@@ -74,6 +97,11 @@ impl HbmRoundaboutController {
             for layer in 0..self.layers {
                 self.heatmap.reinforce_parallel(layer, ch_id);
                 self.ccg.reinforce(layer, ch_id);
+
+                // NEW: tunnel reinforcement
+                if self.channels[ch_id].is_tunnel {
+                    self.channels[ch_id].reinforce_tunnel();
+                }
             }
 
             Some(ch_id)
@@ -85,6 +113,13 @@ impl HbmRoundaboutController {
             for layer in 0..self.layers {
                 self.heatmap.cool_parallel(layer, req.channel_id);
                 self.ccg.cool(layer, req.channel_id);
+
+                // NEW: tunnel cooling
+                if let Some(ch) = self.channels.get_mut(req.channel_id) {
+                    if ch.is_tunnel {
+                        ch.cool_tunnel();
+                    }
+                }
             }
 
             None
