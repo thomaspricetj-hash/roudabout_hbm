@@ -19,12 +19,12 @@ pub fn run_simulation() {
     // MAX‑tier controller (parallel routing)
     let mut ctrl = HbmRoundaboutController::new(channels, layer_count, 0.85);
 
-    // Request (no logic removed)
-    let req = HbmRequest::new(
-        1,
-        0,
-        3,
-        0x1234,
+    // Request (updated to match upgraded HbmRequest fields)
+    let mut req = HbmRequest::new(
+        1,                      // id
+        0,                      // starting channel
+        3,                      // bank
+        0x1234,                 // row address
         RequestPriority::Standard,
         RequestKind::Load,
         layer_count,
@@ -36,6 +36,7 @@ pub fn run_simulation() {
             println!("Request {} exited via channel {}", req.id, ch);
             break;
         } else {
+            req.circulations += 1;
             println!("Request {} circulating (count: {})", req.id, req.circulations);
         }
     }

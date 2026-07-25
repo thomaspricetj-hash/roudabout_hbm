@@ -1,8 +1,8 @@
-⭐ Upgraded Sections for Your HBM White Paper (MAX‑Tier + Tunneling Edition)
+⭐ HBM Roundabout Logic — MAX‑Tier + Tunneling + Multilayer Architecture (Full Upgrade Edition)
 
-Abstract — Updated
+Abstract — Fully Upgraded
 
-Roundabout Logic for HBM now includes tunneling‑aware routing, enabling requests to bypass congested or unstable channels using virtual exits, overlay tunnels, and cross‑channel tunnel paths. These tunnels behave like logical channels, providing alternate routing paths when physical channels are saturated, jittery, or experiencing refresh pressure.
+Roundabout Logic for HBM now incorporates multilayer routing, CrossConnectGrid topology, and tunneling‑aware routing, enabling requests to bypass congested or unstable channels using virtual exits, overlay tunnels, and cross‑channel tunnel paths. These tunnels behave as logical channels, providing alternate routing paths when physical channels are saturated, jittery, or under refresh pressure.
 
 
 
@@ -10,53 +10,73 @@ The upgraded MAX‑tier architecture integrates:
 
 
 
-Multilayer heatmaps
+multilayer heatmaps
 
 
 
-Multilayer routing indices
+multilayer routing indices
 
 
 
-Multilayer CrossConnectGrid
+multilayer CrossConnectGrid
 
 
 
-Priority engines
+multilayer channel metrics
 
 
 
-Scratchpad reinforcement
+multilayer scratchpad reinforcement memory
 
 
 
-Parallel arbitration
+parallel arbitration
 
 
 
-Channel metrics
+parallel priority scoring
 
 
 
-Tunnel metrics (latency, jitter, congestion, stability, loss)
+tunnel metrics (latency, jitter, congestion, stability, loss)
 
 
 
-Tunnel bias + tunnel reinforcement
+tunnel bias + tunnel reinforcement
 
 
 
-Virtual exit selection
+virtual exit selection
 
 
 
-This enhancement increases routing stability, reduces stall cycles, and improves effective bandwidth under extreme parallel workloads.
+rotating doors
 
 
 
-1\. Introduction — Updated
+fused heat + fused grid scoring
 
-Traditional HBM controllers struggle under high parallelism due to static routing and limited flexibility. The MAX‑tier Roundabout Logic now extends beyond physical channels by introducing tunneling, allowing requests to route through:
+
+
+adaptive request bias
+
+
+
+HBM locality (row/bank/channel)
+
+
+
+refresh/ECC pressure modeling
+
+
+
+These enhancements dramatically increase routing stability, reduce stall cycles, and improve effective bandwidth under extreme parallel workloads.
+
+
+
+1\. Introduction — Fully Upgraded
+
+Traditional HBM controllers struggle under high parallelism due to static routing and limited flexibility. The MAX‑tier Roundabout Logic extends beyond physical channels by introducing:
 
 
 
@@ -76,15 +96,29 @@ congestion‑bypass tunnels
 
 
 
-These tunnels provide dynamic escape paths when physical channels are overloaded, reducing hot‑spot amplification and improving fairness.
+multilayer routing
 
 
 
-2\. Conceptual Overview — Updated
+topology‑aware scoring
+
+
+
+reinforcement memory
+
+
+
+These mechanisms provide dynamic escape paths when physical channels are overloaded, reducing hot‑spot amplification and improving fairness.
+
+
+
+2\. Conceptual Overview — Fully Upgraded
 
 2.1 Continuous Circulation + Tunnel Fallback
 
 Requests circulate until a viable physical or tunnel exit becomes available.
+
+
 
 Tunnel fallback activates when:
 
@@ -107,6 +141,14 @@ jitter becomes unstable
 
 
 multilayer heatmap indicates congestion
+
+
+
+CrossConnectGrid bias indicates topology pressure
+
+
+
+scratchpad failure counters increase
 
 
 
@@ -138,13 +180,21 @@ stability factor
 
 
 
+adaptive weight
+
+
+
+locality score
+
+
+
 2.2 Multilayer Exit Selection + Tunnel Scoring
 
-Exit selection now evaluates:
+Exit selection evaluates:
 
 
 
-channel metrics
+channel metrics (load, refresh, ECC, jitter, stability)
 
 
 
@@ -156,15 +206,15 @@ multilayer routing indices
 
 
 
-CrossConnectGrid bias
+CrossConnectGrid bias (cluster, zone, door, geom)
 
 
 
-per‑request bias
+per‑request multilayer bias
 
 
 
-reinforcement signals
+scratchpad reinforcement signals
 
 
 
@@ -192,6 +242,14 @@ tunnel bias
 
 
 
+tunnel reliability
+
+
+
+fused heat + fused grid score
+
+
+
 This produces cognitive, tunnel‑augmented routing decisions.
 
 
@@ -214,6 +272,14 @@ physical exits remain blocked
 
 
 
+locality score indicates conflict
+
+
+
+refresh/ECC pressure increases
+
+
+
 Tunnel escalation increases:
 
 
@@ -230,7 +296,15 @@ tunnel heat signature
 
 
 
-3\. Mapping Roundabout Logic to HBM Architecture — Updated
+multilayer bias
+
+
+
+request stability factor
+
+
+
+3\. Mapping Roundabout Logic to HBM Architecture — Fully Upgraded
 
 3.1 Request Flow
 
@@ -258,6 +332,38 @@ is\_tunnel\_escalated
 
 
 
+locality\_score
+
+
+
+refresh\_pressure
+
+
+
+ecc\_pressure
+
+
+
+adaptive\_weight
+
+
+
+stability\_factor
+
+
+
+multilayer heat
+
+
+
+multilayer bias
+
+
+
+multilayer exit history
+
+
+
 Flow:
 
 
@@ -267,6 +373,14 @@ Request enters roundabout.
 
 
 Heatmaps decay.
+
+
+
+Doors rotate.
+
+
+
+Scratchpad bias applied.
 
 
 
@@ -282,7 +396,7 @@ Best physical or tunnel exit selected.
 
 
 
-Reinforcement applied to both physical and tunnel paths.
+Reinforcement applied to heatmap, grid, scratchpad, and tunnel.
 
 
 
@@ -292,7 +406,7 @@ If no exit → circulation + tunnel escalation.
 
 3.2 Channel Load Monitoring + Tunnel Metrics
 
-Each channel now tracks:
+Each channel tracks:
 
 
 
@@ -324,6 +438,50 @@ tunnel\_reliability
 
 
 
+multilayer load
+
+
+
+multilayer refresh
+
+
+
+multilayer jitter
+
+
+
+multilayer stability
+
+
+
+multilayer scratchpad
+
+
+
+row\_conflicts
+
+
+
+bank\_busy\_events
+
+
+
+channel\_saturation\_events
+
+
+
+refresh\_events
+
+
+
+ecc\_events
+
+
+
+geometry\_score
+
+
+
 Parallel scoring blends:
 
 
@@ -345,6 +503,14 @@ tunnel metrics
 
 
 tunnel bias
+
+
+
+locality score
+
+
+
+refresh/ECC pressure
 
 
 
@@ -370,7 +536,19 @@ stabilizing routing under load
 
 
 
-4\. Performance Improvements — Updated
+reducing row/bank conflicts
+
+
+
+reducing jitter spikes
+
+
+
+reducing ECC stalls
+
+
+
+4\. Performance Improvements — Fully Upgraded
 
 4.1 Reduced Stalls
 
@@ -391,6 +569,14 @@ ECC‑heavy channels
 
 
 congested channels
+
+
+
+topology bottlenecks
+
+
+
+row/bank conflict zones
 
 
 
@@ -421,6 +607,10 @@ Measured improvement:
 
 
 8×–40× higher scoring throughput
+
+
+
+parallel arbitration reduces decision latency
 
 
 
@@ -460,7 +650,7 @@ Measured improvement:
 
 
 
-5\. Scalability — Updated
+5\. Scalability — Fully Upgraded
 
 Tunneling enables:
 
@@ -506,7 +696,11 @@ multilayer depth
 
 
 
-6\. Comparison — Updated
+grid depth
+
+
+
+6\. Comparison — Fully Upgraded
 
 Routing Model	Strengths	Weaknesses
 
@@ -520,13 +714,13 @@ NoC	Flexible	Heavy design overhead
 
 Roundabout Logic	Adaptive, parallel	Requires new controller
 
-Roundabout + Tunneling	Adaptive, parallel, tunnel‑augmented, congestion‑proof	Requires tunnel scoring engine
+Roundabout + Tunneling + Multilayer + Grid	Adaptive, parallel, tunnel‑augmented, topology‑aware, congestion‑proof, cognitive	Requires multilayer scoring engine
 
 
 
 
 
-7\. Implementation Considerations — Updated
+7\. Implementation Considerations — Fully Upgraded
 
 7.1 Controller Microarchitecture
 
@@ -547,6 +741,30 @@ tunnel reinforcement logic
 
 
 virtual exit registry
+
+
+
+multilayer heatmap engine
+
+
+
+multilayer grid engine
+
+
+
+scratchpad reinforcement engine
+
+
+
+parallel arbitration engine
+
+
+
+parallel priority engine
+
+
+
+fused heat/grid scoring unit
 
 
 
@@ -576,13 +794,53 @@ tunnel cooling
 
 
 
+multilayer heatmap decay
+
+
+
+multilayer bias injection
+
+
+
+rotating door logic
+
+
+
+scratchpad memory updates
+
+
+
 7.3 Hardware Cost
 
 Still minimal — tunneling is controller‑level logic.
 
 
 
-8\. Applications — Updated
+No changes required to:
+
+
+
+HBM PHY
+
+
+
+HBM stack
+
+
+
+DRAM banks
+
+
+
+DRAM rows
+
+
+
+DRAM refresh logic
+
+
+
+8\. Applications — Fully Upgraded
 
 Tunneling improves:
 
@@ -616,9 +874,69 @@ multi‑cluster HBM fabrics
 
 
 
-9\. Conclusion — Updated
+real‑time ML systems
 
-Roundabout Logic for HBM, now enhanced with tunneling, provides:
+
+
+autonomous agents
+
+
+
+robotics memory systems
+
+
+
+9\. Conclusion — Fully Upgraded
+
+Roundabout Logic for HBM, now enhanced with:
+
+
+
+tunneling
+
+
+
+multilayer routing
+
+
+
+multilayer heatmaps
+
+
+
+multilayer grid
+
+
+
+multilayer metrics
+
+
+
+scratchpad reinforcement
+
+
+
+parallel arbitration
+
+
+
+parallel priority
+
+
+
+fused heat/grid scoring
+
+
+
+adaptive request bias
+
+
+
+topology awareness
+
+
+
+provides:
 
 
 
@@ -643,6 +961,10 @@ tunnel‑augmented fairness
 
 
 cognitive routing behavior
+
+
+
+topology‑aware decision making
 
 
 

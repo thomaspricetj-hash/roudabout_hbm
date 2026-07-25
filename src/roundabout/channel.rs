@@ -1,5 +1,10 @@
 use rayon::prelude::*;
-use super::metrics::ChannelMetrics;
+
+use super::{
+    metrics::ChannelMetrics,
+    heatmap::Heatmap,
+    grid::CrossConnectGrid,
+};
 
 #[derive(Debug, Clone)]
 pub struct BankState {
@@ -17,6 +22,9 @@ pub struct HbmChannel {
 
     pub heat_affinity: f32,
     pub reliability_score: f32,
+
+    // NEW: grid/topology‑aware locality score
+    pub locality_score: f32,
 
     // NEW: tunneling fields
     pub is_tunnel: bool,
@@ -41,6 +49,7 @@ impl HbmChannel {
             max_load,
             heat_affinity: 0.0,
             reliability_score: 1.0,
+            locality_score: 0.0,
 
             // tunneling defaults
             is_tunnel: false,
@@ -253,6 +262,60 @@ impl HbmChannel {
         };
 
         bank_busy + row_affinity + heat_affinity + metrics_score + tunnel_score
+    }
+
+    /// NEW: composite parallel channel score with Heatmap + CrossConnectGrid
+    pub fn composite_channel_score_parallel_with_grid(
+        &self,
+        target_row: u64,
+        heatmap: &Heatmap,
+        ccg: &CrossConnectGrid,
+        _layer_count: usize,
+    ) -> f32 {
+        let bank_busy = self.bank_busy_score_parallel();
+        let row_affinity = self.open_row_affinity_parallel(target_row);
+
+        // use full multilayer heatmap
+        let heat_affinity = heatmap.layers
+            .par_iter()
+            .map(|layer| layer.get(self.id).copied().unwrap_or(0.0))
+            .sum::<f32>();
+
+        // metrics score as before
+        let metrics_score =
+            (self.metrics.load * 0.20)
+            + (self.metrics.refresh_pressure * 0.30)
+            + (self.metrics.ecc_activity * 0.25)
+            + (self.metrics.jitter_cycles * 0.10)
+            + ((1.0 - self.metrics.stability_score) * 0.20);
+
+        // grid fused bias
+        let grid_bias = ccg.fused_bias(self.id);
+
+        // tunneling contribution
+        let tunnel_score = if self.is_tunnel {
+            let mut score = 0.0;
+
+            score += (self.metrics.tunnel_latency_ms / 100.0) * 0.10;
+            score += (self.metrics.tunnel_jitter_ms / 100.0) * 0.10;
+            score += self.metrics.tunnel_congestion_level * 0.15;
+            score += (1.0 - self.metrics.tunnel_stability_score) * 0.20;
+            score -= (1.0 - self.metrics.tunnel_loss_rate) * 0.10;
+
+            score += self.tunnel_bias * 0.10;
+            score += (1.0 - self.tunnel_reliability) * 0.15;
+
+            score
+        } else {
+            0.0
+        };
+
+        bank_busy
+            + row_affinity
+            + heat_affinity
+            + metrics_score
+            + tunnel_score
+            - grid_bias
     }
 }
 

@@ -25,6 +25,10 @@ pub struct HbmRequest {
     pub bank_id: usize,
     pub row_addr: u64,
 
+    // NEW: explicit HBM locality fields
+    pub row: u32,
+    pub bank: u32,
+
     pub created_at: Instant,
     pub last_attempt: Instant,
     pub circulations: u32,
@@ -41,6 +45,11 @@ pub struct HbmRequest {
 
     pub adaptive_weight: f32,
     pub stability_factor: f32,
+
+    // NEW: HBM‑aware request state
+    pub locality_score: f32,
+    pub refresh_pressure: f32,
+    pub ecc_pressure: f32,
 
     pub is_tunnel_escalated: bool,
     pub tunnel_preference: f32,
@@ -67,6 +76,8 @@ impl HbmRequest {
             channel_id,
             bank_id,
             row_addr,
+            row: (row_addr & 0xFFFF_FFFF) as u32,
+            bank: bank_id as u32,
             created_at: now,
             last_attempt: now,
             circulations: 0,
@@ -82,6 +93,10 @@ impl HbmRequest {
 
             adaptive_weight: 1.0,
             stability_factor: 1.0,
+
+            locality_score: 0.0,
+            refresh_pressure: 0.0,
+            ecc_pressure: 0.0,
 
             is_tunnel_escalated: false,
             tunnel_preference: 0.0,
@@ -181,6 +196,25 @@ impl HbmRequest {
         } else {
             self.stability_factor = (self.stability_factor - 0.05).max(0.1);
         }
+    }
+
+    // NEW: update locality score from heatmap/grid
+    pub fn update_locality_score(&mut self, score: f32) {
+        self.locality_score = score.clamp(-1.0, 1.0);
+    }
+
+    // NEW: update refresh/ecc pressures (for arbitration priority escalation)
+    pub fn update_refresh_pressure(&mut self, pressure: f32) {
+        self.refresh_pressure = pressure.clamp(0.0, 1.0);
+    }
+
+    pub fn update_ecc_pressure(&mut self, pressure: f32) {
+        self.ecc_pressure = pressure.clamp(0.0, 1.0);
+    }
+
+    pub fn touch_attempt(&mut self) {
+        self.last_attempt = Instant::now();
+        self.circulations = self.circulations.saturating_add(1);
     }
 }
 

@@ -110,7 +110,51 @@ impl RoutingIndex {
             .sum()
     }
 
-    /// MAX‑tier composite index score (metrics + heatmap + grid)
+    /// NEW: MAX‑tier HBM locality scoring
+    /// Adds row/bank/channel locality + refresh/ECC penalties
+    pub fn locality_score(channel: &HbmChannel, heatmap: &Heatmap) -> f32 {
+        let mut score = 0.0;
+
+        // row locality (strongest)
+        score += heatmap.row_conflict[channel.id] * 0.40;
+
+        // bank locality
+        score += heatmap.bank_busy[channel.id] * 0.35;
+
+        // channel saturation
+        score += heatmap.channel_sat[channel.id] * 0.25;
+
+        // refresh penalty
+        score -= heatmap.refresh_heat[channel.id] * 0.30;
+
+        // ECC penalty
+        score -= heatmap.ecc_heat[channel.id] * 0.25;
+
+        score
+    }
+
+    /// NEW: MAX‑tier HBM geometry scoring
+    pub fn geometry_score(channel: &HbmChannel, ccg: &CrossConnectGrid) -> f32 {
+        let id = channel.id;
+
+        let mut score = 0.0;
+
+        score += ccg.geom_bias[0][id] * 0.30; // row distance
+        score += ccg.geom_bias[1][id] * 0.25; // bank distance
+        score += ccg.geom_bias[2][id] * 0.20; // channel distance
+        score += ccg.geom_bias[3][id] * 0.15; // die distance
+
+        score
+    }
+
+    /// NEW: MAX‑tier HBM reliability scoring
+    pub fn reliability_score(channel: &HbmChannel) -> f32 {
+        (channel.metrics.stability_score * 0.50)
+            - (channel.metrics.ecc_activity * 0.30)
+            - (channel.metrics.refresh_pressure * 0.20)
+    }
+
+    /// MAX‑tier composite index score (metrics + heatmap + grid + locality + geometry + reliability)
     pub fn composite_index_score(
         request: &HbmRequest,
         channel: &HbmChannel,
@@ -131,8 +175,17 @@ impl RoutingIndex {
         let fused_heat = heatmap.fused_heat(channel.id);
         let fused_grid = ccg.fused_bias(channel.id);
 
-        layer_score + channel_score + fused_heat - fused_grid
+        let locality = Self::locality_score(channel, heatmap);
+        let geometry = Self::geometry_score(channel, ccg);
+        let reliability = Self::reliability_score(channel);
+
+        layer_score
+            + channel_score
+            + fused_heat
+            - fused_grid
+            + locality
+            + geometry
+            + reliability
     }
 }
-
 

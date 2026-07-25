@@ -30,7 +30,7 @@ pub struct ChannelMetrics {
     // NEW: multilayer scratchpad
     pub scratch: Vec<f32>,
 
-    // NEW: tunneling metrics
+    // NEW: tunneling metrics (repurposed for locality overlays if needed)
     pub tunnel_latency_ms: f32,
     pub tunnel_jitter_ms: f32,
     pub tunnel_loss_rate: f32,
@@ -39,6 +39,17 @@ pub struct ChannelMetrics {
 
     // NEW: tunneling multilayer bias
     pub tunnel_bias: f32,
+
+    // NEW: HBM-specific counters
+    pub row_conflicts: u32,
+    pub bank_busy_events: u32,
+    pub channel_saturation_events: u32,
+    pub refresh_events: u32,
+    pub ecc_events: u32,
+
+    // NEW: locality reliability
+    pub locality_score: f32,
+    pub geometry_score: f32,
 }
 
 impl ChannelMetrics {
@@ -68,10 +79,20 @@ impl ChannelMetrics {
             tunnel_stability_score: 1.0,
             tunnel_congestion_level: 0.0,
             tunnel_bias: 0.0,
+
+            // HBM-specific counters
+            row_conflicts: 0,
+            bank_busy_events: 0,
+            channel_saturation_events: 0,
+            refresh_events: 0,
+            ecc_events: 0,
+
+            locality_score: 0.0,
+            geometry_score: 0.0,
         }
     }
 
-    /// MAX‑tier: multilayer parallel metric scoring (Heatmap + Grid + Metrics + Tunneling)
+    /// MAX‑tier: multilayer parallel metric scoring (Heatmap + Grid + Metrics + Tunneling + HBM locality)
     pub fn multilayer_score_parallel(
         &self,
         req: &HbmRequest,
@@ -109,7 +130,7 @@ impl ChannelMetrics {
                 // Rotating door bias
                 let door_rot = ccg.door_rotation[layer][channel.id] as f32 * 0.01;
 
-                // NEW: tunneling contribution
+                // Tunneling / overlay contribution (optional locality overlay)
                 let tunnel_score = if channel.is_tunnel {
                     let mut score = 0.0;
 
@@ -127,7 +148,26 @@ impl ChannelMetrics {
                     0.0
                 };
 
-                base + req_bias + heat + scratch + door_rot - grid_bias + tunnel_score
+                // HBM locality contribution
+                let locality =
+                    heatmap.row_conflict[channel.id] * 0.40 +
+                    heatmap.bank_busy[channel.id] * 0.35 +
+                    heatmap.channel_sat[channel.id] * 0.25;
+
+                // Refresh/ECC penalties
+                let penalties =
+                    -heatmap.refresh_heat[channel.id] * 0.30 -
+                    heatmap.ecc_heat[channel.id] * 0.25;
+
+                base
+                    + req_bias
+                    + heat
+                    + scratch
+                    + door_rot
+                    - grid_bias
+                    + tunnel_score
+                    + locality
+                    + penalties
             })
             .sum()
     }
@@ -142,8 +182,12 @@ impl ChannelMetrics {
             .iter_mut()
             .for_each(|s| *s = (*s + delta).clamp(0.1, 2.0));
 
-        // NEW: tunnel stability reinforcement
+        // tunnel stability reinforcement
         self.tunnel_stability_score = (self.tunnel_stability_score + delta).clamp(0.1, 2.0);
+
+        // locality reliability
+        let success_factor = if success { 0.05 } else { -0.05 };
+        self.locality_score = (self.locality_score + success_factor).clamp(-1.0, 1.0);
     }
 
     /// MAX‑tier: refresh pressure update (multilayer)
@@ -158,6 +202,8 @@ impl ChannelMetrics {
         self.layer_refresh
             .iter_mut()
             .for_each(|r| *r = pressure);
+
+        self.refresh_events = self.refresh_events.saturating_add(1);
     }
 
     /// MAX‑tier: ECC activity update (multilayer)
@@ -169,6 +215,8 @@ impl ChannelMetrics {
         self.layer_load
             .iter_mut()
             .for_each(|l| *l += ecc * 0.01);
+
+        self.ecc_events = self.ecc_events.saturating_add(ecc_events);
     }
 
     /// MAX‑tier: jitter update (multilayer)
@@ -181,7 +229,7 @@ impl ChannelMetrics {
             .iter_mut()
             .for_each(|v| *v = j);
 
-        // NEW: tunnel jitter update
+        // tunnel jitter update
         self.tunnel_jitter_ms = j * 100.0;
     }
 
@@ -195,8 +243,29 @@ impl ChannelMetrics {
             .iter_mut()
             .for_each(|l| *l += t * 0.01);
 
-        // NEW: tunnel congestion update
+        // tunnel congestion update
         self.tunnel_congestion_level = (t * 0.02).min(1.0);
+
+        // channel saturation events
+        self.channel_saturation_events = self.channel_saturation_events.saturating_add(1);
+    }
+
+    /// NEW: row conflict update
+    pub fn update_row_conflict(&mut self, conflicts: u32) {
+        self.row_conflicts = self.row_conflicts.saturating_add(conflicts);
+        self.row_availability = (self.row_availability - conflicts as f32 * 0.01).max(0.0);
+    }
+
+    /// NEW: bank busy update
+    pub fn update_bank_busy(&mut self, busy_events: u32) {
+        self.bank_busy_events = self.bank_busy_events.saturating_add(busy_events);
+        self.load += busy_events as f32 * 0.01;
+    }
+
+    /// NEW: geometry reliability update (from grid)
+    pub fn update_geometry_reliability(&mut self, ccg: &CrossConnectGrid, channel_id: usize) {
+        let fused = ccg.fused_bias(channel_id);
+        self.geometry_score = fused.clamp(-2.0, 2.0);
     }
 }
 

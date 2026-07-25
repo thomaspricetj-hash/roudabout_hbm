@@ -25,6 +25,26 @@ impl ArbitrationEngine {
         }
     }
 
+    /// NEW: HBM‑aware priority escalation
+    pub fn hbm_priority_escalation(req: &HbmRequest) -> f32 {
+        let mut esc = 0.0;
+
+        // row / bank locality escalation
+        if req.locality_score > 0.5 {
+            esc -= 0.10;
+        }
+
+        // refresh / ECC pressure escalation
+        if req.refresh_pressure > 0.5 {
+            esc -= 0.05;
+        }
+        if req.ecc_pressure > 0.5 {
+            esc -= 0.05;
+        }
+
+        esc
+    }
+
     // -------------------------------------------------------------------------
     // MAX‑tier parallel arbitration upgrades
     // -------------------------------------------------------------------------
@@ -38,7 +58,7 @@ impl ArbitrationEngine {
         layer_count: usize,
     ) -> f32 {
         // Priority weight
-        let priority = Self::priority_weight(req);
+        let priority = Self::priority_weight(req) + Self::hbm_priority_escalation(req);
 
         // Parallel multilayer index scoring (heat + grid + metrics)
         let index_score = RoutingIndex::score_channel_parallel_with_grid(
@@ -66,11 +86,29 @@ impl ArbitrationEngine {
             .map(|layer| layer.get(channel.id).copied().unwrap_or(0.0))
             .sum::<f32>();
 
-        // Grid fused bias (cluster + zone + door + geom)
+        // NEW: HBM locality contribution
+        let locality =
+            heatmap.row_conflict[channel.id] * 0.40 +
+            heatmap.bank_busy[channel.id] * 0.35 +
+            heatmap.channel_sat[channel.id] * 0.25;
+
+        // NEW: refresh/ECC penalties
+        let penalties =
+            -heatmap.refresh_heat[channel.id] * 0.30 -
+            -heatmap.ecc_heat[channel.id] * 0.25;
+
+        // Grid fused bias (cluster + zone + door + geom + locality)
         let grid_bias = ccg.fused_bias(channel.id);
 
         // Composite arbitration score
-        priority + index_score + metrics_score + bank_busy_score + heat_affinity - grid_bias
+        priority
+            + index_score
+            + metrics_score
+            + bank_busy_score
+            + heat_affinity
+            + locality
+            + penalties
+            - grid_bias
     }
 
     /// Parallel arbitration across all channels
@@ -103,4 +141,3 @@ impl ArbitrationEngine {
             .map(|(id, _)| id)
     }
 }
-

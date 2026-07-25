@@ -57,7 +57,29 @@ impl PriorityEngine {
         0.0
     }
 
-    /// MAX‑tier parallel multilayer priority scoring (heat + grid + index + metrics)
+    /// NEW: HBM locality‑aware priority bias
+    pub fn hbm_locality_bias(heatmap: &Heatmap, channel_id: usize) -> f32 {
+        let row = heatmap.row_conflict[channel_id];
+        let bank = heatmap.bank_busy[channel_id];
+        let chan = heatmap.channel_sat[channel_id];
+
+        (row * 0.20) + (bank * 0.15) + (chan * 0.10)
+    }
+
+    /// NEW: refresh/ECC priority bias
+    pub fn refresh_ecc_bias(heatmap: &Heatmap, channel_id: usize) -> f32 {
+        let refresh = heatmap.refresh_heat[channel_id];
+        let ecc = heatmap.ecc_heat[channel_id];
+
+        (refresh * 0.20) + (ecc * 0.20)
+    }
+
+    /// NEW: grid‑aware priority bias (geometry/topology)
+    pub fn grid_priority_bias(ccg: &CrossConnectGrid, channel_id: usize) -> f32 {
+        ccg.fused_bias(channel_id) * 0.05
+    }
+
+    /// MAX‑tier parallel multilayer priority scoring (heat + grid + index + metrics + HBM locality)
     pub fn composite_priority_parallel(
         req: &HbmRequest,
         channel: &HbmChannel,
@@ -111,8 +133,24 @@ impl PriorityEngine {
         // Bank‑busy bias
         let bank_bias = Self::bank_bias(channel, req.bank_id);
 
+        // HBM locality bias
+        let locality_bias = Self::hbm_locality_bias(heatmap, channel.id);
+
+        // Refresh/ECC bias
+        let refresh_ecc = Self::refresh_ecc_bias(heatmap, channel.id);
+
+        // Grid fused bias (topology/geometry)
+        let grid_fused = Self::grid_priority_bias(ccg, channel.id);
+
         // Composite score
-        let mut score = base + layer_bias_sum + channel_bias + bank_bias;
+        let mut score =
+            base
+            + layer_bias_sum
+            + channel_bias
+            + bank_bias
+            + locality_bias
+            + refresh_ecc
+            + grid_fused;
 
         // Reinforcement learning: stable requests get lower priority weight
         score *= req.stability_factor;

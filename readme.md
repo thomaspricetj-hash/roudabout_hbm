@@ -10,7 +10,7 @@ Inspired by traffic roundabouts, this controller eliminates stalls, reduces cont
 
 
 
-This project implements the complete MAX‑tier Roundabout Logic for HBM described in the accompanying white paper.
+This project implements the complete MAX‑tier Roundabout Logic for HBM, including multilayer routing, CrossConnectGrid topology, scratchpad reinforcement memory, and tunneling.
 
 
 
@@ -20,35 +20,35 @@ Traditional HBM controllers rely on static routing models (crossbar, mesh, ring 
 
 
 
-Channel contention
+channel contention
 
 
 
-Refresh‑cycle blocking
+refresh‑cycle blocking
 
 
 
-Priority inversion
+priority inversion
 
 
 
-Starvation
+starvation
 
 
 
-Pipeline stalls
+pipeline stalls
 
 
 
-Uneven load distribution
+uneven load distribution
 
 
 
-Hot‑spot amplification
+hot‑spot amplification
 
 
 
-Routing collisions
+routing collisions
 
 
 
@@ -96,23 +96,23 @@ Tracks per‑layer thermal/load signatures for every channel.
 
 
 
-Parallel decay
+parallel decay
 
 
 
-Parallel normalization
+parallel normalization
 
 
 
-Parallel reinforcement \& cooling
+parallel reinforcement \& cooling
 
 
 
-Layer‑wide heat injection
+layer‑wide heat injection
 
 
 
-Fused heat scoring integrated into routing, priority, arbitration, and scratchpad
+fused heat scoring integrated into routing, priority, arbitration, and scratchpad
 
 
 
@@ -122,11 +122,11 @@ Scores channels using:
 
 
 
-Load
+load
 
 
 
-Refresh pressure
+refresh pressure
 
 
 
@@ -134,23 +134,23 @@ ECC activity
 
 
 
-Jitter
+jitter
 
 
 
-Stability
+stability
 
 
 
-Heatmap values
+heatmap values
 
 
 
-Request bias
+request bias
 
 
 
-Reinforcement signals
+reinforcement signals
 
 
 
@@ -158,15 +158,15 @@ CrossConnectGrid spatial bias (cluster, zone, door, geometry)
 
 
 
-Rotating‑door bias
+rotating‑door bias
 
 
 
-Tunnel metrics (latency, jitter, congestion, stability, loss)
+tunnel metrics (latency, jitter, congestion, stability, loss)
 
 
 
-Tunnel bias + tunnel reliability
+tunnel bias + tunnel reliability
 
 
 
@@ -180,31 +180,31 @@ Adds spatial routing physics:
 
 
 
-Cluster bias
+cluster bias
 
 
 
-Zone bias
+zone bias
 
 
 
-Door bias
+door bias
 
 
 
-Geometry bias
+geometry bias
 
 
 
-Rotating doors
+rotating doors
 
 
 
-Fused grid bias
+fused grid bias
 
 
 
-Parallel per‑layer scoring
+parallel per‑layer scoring
 
 
 
@@ -218,31 +218,31 @@ Implements:
 
 
 
-Priority weights
+priority weights
 
 
 
-Escalation logic
+escalation logic
 
 
 
-Adaptive weighting
+adaptive weighting
 
 
 
-Stability factor adjustments
+stability factor adjustments
 
 
 
-Multilayer heat + grid + index bias
+multilayer heat + grid + index bias
 
 
 
-Tunnel escalation
+tunnel escalation
 
 
 
-Parallel fused priority scoring
+parallel fused priority scoring
 
 
 
@@ -252,31 +252,31 @@ Tracks:
 
 
 
-Per‑layer exit history
+per‑layer exit history
 
 
 
-Per‑layer failures
+per‑layer failures
 
 
 
-Adaptive bias
+adaptive bias
 
 
 
-Rotating‑door bias
+rotating‑door bias
 
 
 
-Grid‑aware reinforcement
+grid‑aware reinforcement
 
 
 
-Heat‑aware reinforcement
+heat‑aware reinforcement
 
 
 
-Tunnel reinforcement signals
+tunnel reinforcement signals
 
 
 
@@ -290,15 +290,15 @@ Each channel tracks:
 
 
 
-Load
+load
 
 
 
-Row availability
+row availability
 
 
 
-Refresh pressure
+refresh pressure
 
 
 
@@ -306,27 +306,27 @@ ECC activity
 
 
 
-Jitter cycles
+jitter cycles
 
 
 
-Error rate
+error rate
 
 
 
-Throughput
+throughput
 
 
 
-Stability score
+stability score
 
 
 
-Multilayer load/refresh/jitter/stability
+multilayer load/refresh/jitter/stability
 
 
 
-Multilayer scratchpad
+multilayer scratchpad
 
 
 
@@ -334,31 +334,31 @@ NEW tunnel metrics:
 
 
 
-Tunnel latency
+tunnel latency
 
 
 
-Tunnel jitter
+tunnel jitter
 
 
 
-Tunnel loss rate
+tunnel loss rate
 
 
 
-Tunnel stability score
+tunnel stability score
 
 
 
-Tunnel congestion level
+tunnel congestion level
 
 
 
-Tunnel bias
+tunnel bias
 
 
 
-Tunnel reliability
+tunnel reliability
 
 
 
@@ -372,35 +372,35 @@ Combines:
 
 
 
-Priority
+priority
 
 
 
-Routing index
+routing index
 
 
 
-Channel metrics
+channel metrics
 
 
 
-Heatmap affinity
+heatmap affinity
 
 
 
-Grid bias
+grid bias
 
 
 
-Bank‑busy scoring
+bank‑busy scoring
 
 
 
-Reinforcement signals
+reinforcement signals
 
 
 
-Tunnel scoring
+tunnel scoring
 
 
 
@@ -414,47 +414,51 @@ The central orchestrator:
 
 
 
-Decays heatmaps
+decays heatmaps
 
 
 
-Computes parallel multilayer scores
+rotates doors
 
 
 
-Applies CrossConnectGrid spatial bias
+computes parallel multilayer scores
 
 
 
-Computes tunnel scoring
+applies CrossConnectGrid spatial bias
 
 
 
-Selects physical or tunnel exits
+computes tunnel scoring
 
 
 
-Reinforces successful routes
+selects physical or tunnel exits
 
 
 
-Cools failed routes
+reinforces successful routes
 
 
 
-Updates multilayer scratchpad
+cools failed routes
 
 
 
-Updates tunnel bias + tunnel reliability
+updates multilayer scratchpad
 
 
 
-Ensures fairness and continuous flow
+updates tunnel bias + tunnel reliability
 
 
 
-Maintains cognitive routing stability
+ensures fairness and continuous flow
+
+
+
+maintains cognitive routing stability
 
 
 
@@ -524,35 +528,35 @@ Demonstrates:
 
 
 
-Controller initialization
+controller initialization
 
 
 
-Request creation
+request creation
 
 
 
-Parallel routing
+parallel routing
 
 
 
-Tunnel fallback
+tunnel fallback
 
 
 
-Circulation behavior
+circulation behavior
 
 
 
-Exit selection
+exit selection
 
 
 
-Multilayer scoring
+multilayer scoring
 
 
 
-Reinforcement updates
+reinforcement updates
 
 
 
@@ -598,11 +602,11 @@ Performance Gains (MAX‑Tier SyntheticMind Simulations)
 
 
 
-Tunnel fallback reduces congestion by 25–45%
+25–45% congestion reduction via tunnel fallback
 
 
 
-Tunnel scoring improves exit availability by 15–30%
+15–30% improved exit availability via tunnel scoring
 
 
 
