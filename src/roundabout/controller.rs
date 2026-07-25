@@ -80,6 +80,66 @@ fn compute_dynamic_fiber_count(
     fibers.clamp(3, 12)
 }
 
+// ---------- RULES OF THE ROAD HELPERS (local, no extra structs) ----------
+
+fn no_u_turn_penalty(scratchpad: &Scratchpad, ch: usize, window: usize) -> f32 {
+    for layer in 0..scratchpad.layers {
+        for i in 0..window {
+            if let Some(prev) = scratchpad.history[layer][i] {
+                if prev == ch {
+                    return -0.10;
+                }
+            }
+        }
+    }
+    0.0
+}
+
+fn stability_yield_bias(scratchpad: &Scratchpad, ch: usize, bias: f32) -> f32 {
+    let mut b = 0.0;
+    for layer in 0..scratchpad.layers {
+        if let Some(last_exit) = scratchpad.last_channel[layer] {
+            if last_exit == ch {
+                b += bias;
+            }
+        }
+    }
+    b
+}
+
+fn emergency_preempt_bonus(req: &HbmRequest) -> f32 {
+    match req.priority {
+        super::request::RequestPriority::High => 0.20,
+        _ => 0.0,
+    }
+}
+
+fn construction_zone_penalty(heatmap: &Heatmap, ch: usize) -> f32 {
+    let mut penalty = 0.0;
+    for layer in 0..heatmap.layers.len() {
+        let heat = heatmap.layers[layer][ch];
+        if heat > 0.85 {
+            penalty -= 0.25;
+        }
+    }
+    penalty
+}
+
+fn lane_discipline_penalty(_req: &HbmRequest, _channel: &HbmChannel) -> f32 {
+    // Placeholder for future lane_type integration:
+    // if req.lane_type != channel.lane_type { -0.10 } else { 0.0 }
+    0.0
+}
+
+fn speed_limit_penalty(channel: &HbmChannel) -> f32 {
+    let usage = channel.metrics.load / channel.max_load;
+    if usage > 0.90 {
+        -0.15
+    } else {
+        0.0
+    }
+}
+
 impl HbmRoundaboutController {
     pub fn new(channels: Vec<HbmChannel>, layers: usize, decay: f32) -> Self {
         let channel_count = channels.len();
@@ -263,6 +323,7 @@ impl HbmRoundaboutController {
                     }
                     thermal_geom /= layers as f32;
 
+                    // Existing scoring fusion
                     route_score += locality_score;
                     route_score += tunnel_score;
                     route_score += geom_score * 0.10;
@@ -272,6 +333,28 @@ impl HbmRoundaboutController {
                     route_score += thermal_geom * 0.05;
                     route_score -= rowhammer_penalty;
                     route_score -= bank_conflict_score;
+
+                    // ---------- RULES OF THE ROAD APPLIED HERE ----------
+
+                    // No‑U‑turn / backtracking
+                    route_score += no_u_turn_penalty(scratchpad, ch, 3);
+
+                    // Yield to existing flows (stability bias)
+                    route_score += stability_yield_bias(scratchpad, ch, 0.05);
+
+                    // Emergency preemption
+                    route_score += emergency_preempt_bonus(&fiber_req);
+
+                    // Construction zones (overheated channels)
+                    route_score += construction_zone_penalty(heatmap, ch);
+
+                    // Lane discipline (placeholder for future lane types)
+                    route_score += lane_discipline_penalty(&fiber_req, &channels[ch]);
+
+                    // Speed limits / rate limiting
+                    route_score += speed_limit_penalty(&channels[ch]);
+
+                    // ----------------------------------------------------
 
                     CascadeFiberResult {
                         ch_id: Some(ch),

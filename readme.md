@@ -1,4 +1,6 @@
-⭐ README.md — HBM Roundabout Controller (MAX‑Tier + Tunneling + Cognitive Edition)
+⭐ UPDATED README.md — HBM Roundabout Controller (MAX‑Tier + Tunneling + Cognitive Edition)
+
+Fully Upgraded \& License‑Protected
 
 HBM Roundabout Controller — MAX‑Tier Parallel Cognitive Memory Routing Engine
 
@@ -778,11 +780,69 @@ src/
 
 &#x20;   simple\_loop.rs       # Example simulation
 
-License \& Protection Notice
+License \& Protection Notice (Integrated)
+
+Copyright © 2024–2026 Thomas Price.
+
+All Rights Reserved.
+
+
 
 Roundabout Logic for HBM — including all algorithms, routing models, controller behaviors, circulation strategies, priority systems, multilayer heatmap mechanisms, routing index computations, CrossConnectGrid spatial bias models, scratchpad reinforcement methods, parallel arbitration schemes, tunneling mechanisms, predictive scoring engines, thermal‑geometry coupling, bank‑conflict prediction, adaptive fiber scaling, and load‑aware exit selection mechanisms — is the exclusive intellectual property of the author.
 
 
 
+No part of this work may be:
+
+
+
+used
+
+
+
+copied
+
+
+
+reproduced
+
+
+
+modified
+
+
+
+distributed
+
+
+
+disclosed
+
+
+
+reverse‑engineered
+
+
+
+decompiled
+
+
+
+incorporated into any product
+
+
+
+or used to create derivative works
+
+
+
+without explicit written permission from Thomas Price.
+
+
+
 Unauthorized reproduction, modification, or implementation is strictly prohibited.
+
+
+
+Commercial licensing is available only through direct agreement with the author.
 

@@ -1,6 +1,74 @@
 ⭐ HBM Roundabout Logic — MAX‑Tier + Tunneling + Multilayer + Cognitive Routing Edition
 
-Fully Upgraded White Paper
+Fully Upgraded White Paper (with Proprietary License)
+
+Intellectual Property \& Licensing Notice
+
+Proprietary License — Full Protection
+
+
+
+Copyright © 2024–2026 Thomas Price. All Rights Reserved.
+
+
+
+This document, including all designs, algorithms, routing logic, architectural concepts, diagrams, terminology, and technical methods described herein, is proprietary and confidential.
+
+No part of this work may be:
+
+
+
+used
+
+
+
+copied
+
+
+
+reproduced
+
+
+
+modified
+
+
+
+distributed
+
+
+
+disclosed
+
+
+
+reverse‑engineered
+
+
+
+decompiled
+
+
+
+incorporated into any product
+
+
+
+or used to create derivative works
+
+
+
+without explicit written permission from the author, Thomas Price.
+
+
+
+Unauthorized use of this design is strictly prohibited and may result in civil and criminal penalties under U.S. and international intellectual property law.
+
+
+
+Commercial licensing is available only through direct agreement with the author.
+
+
 
 Abstract — Fully Upgraded
 
@@ -240,7 +308,7 @@ Exit selection evaluates:
 
 
 
-channel metrics (load, refresh, ECC, jitter, stability)
+channel metrics
 
 
 
@@ -252,7 +320,7 @@ multilayer routing indices
 
 
 
-CrossConnectGrid bias (cluster, zone, door, geom)
+CrossConnectGrid bias
 
 
 
@@ -264,23 +332,7 @@ scratchpad reinforcement signals
 
 
 
-tunnel latency
-
-
-
-tunnel jitter
-
-
-
-tunnel congestion
-
-
-
-tunnel stability
-
-
-
-tunnel loss rate
+tunnel latency/jitter/congestion/stability/loss
 
 
 
@@ -301,10 +353,6 @@ thermal‑geometry coupling
 
 
 bank‑conflict prediction
-
-
-
-This produces cognitive, tunnel‑augmented routing decisions.
 
 
 
@@ -482,7 +530,7 @@ Best physical or tunnel exit selected.
 
 
 
-Reinforcement applied to heatmap, grid, scratchpad, tunnel, and geometry.
+Reinforcement applied across all subsystems.
 
 
 
@@ -524,19 +572,7 @@ tunnel\_reliability
 
 
 
-multilayer load
-
-
-
-multilayer refresh
-
-
-
-multilayer jitter
-
-
-
-multilayer stability
+multilayer load/refresh/jitter/stability
 
 
 
@@ -709,10 +745,6 @@ Measured improvement:
 
 
 8×–40× higher scoring throughput
-
-
-
-parallel arbitration reduces decision latency
 
 
 
@@ -1131,8 +1163,4 @@ conflict‑aware routing
 
 
 This MAX‑tier architecture is simple to integrate, highly scalable, and ideal for modern AI systems.
-
-
-
-please read license my work is fully protected against idea theft
 
