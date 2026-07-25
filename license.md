@@ -616,3 +616,7 @@ Unauthorized use constitutes a violation of this license and may result in immed
 “No cognitive‑routing derivatives”
 
 
+
+
+all idea and use case in this project is fully protected.
+
