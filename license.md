@@ -609,4 +609,10 @@ These protections apply universally to all versions, updates, patches, extension
 
 
 Unauthorized use constitutes a violation of this license and may result in immediate termination of all granted rights.
+“No topology replication”
+
+“No routing‑physics reuse”
+
+“No cognitive‑routing derivatives”
+
 
