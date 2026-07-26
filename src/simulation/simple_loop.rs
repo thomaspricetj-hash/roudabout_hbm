@@ -5,6 +5,95 @@ use crate::roundabout::{
     request::{HbmRequest, RequestKind, RequestPriority},
 };
 
+fn attach_pairs(channels: &mut [HbmChannel]) {
+    for (pair_id, pair) in channels.chunks_mut(2).enumerate() {
+        if pair.len() == 2 {
+            pair[0].attach_group(pair_id, 2, true);  // primary
+            pair[1].attach_group(pair_id, 2, false); // secondary
+        }
+    }
+}
+
+fn attach_triplets(channels: &mut [HbmChannel]) {
+    for (group_id, group) in channels.chunks_mut(3).enumerate() {
+        if group.len() == 3 {
+            group[0].attach_group(group_id, 3, true);
+            group[1].attach_group(group_id, 3, false);
+            group[2].attach_group(group_id, 3, false);
+        }
+    }
+}
+
+fn attach_quads(channels: &mut [HbmChannel]) {
+    for (group_id, group) in channels.chunks_mut(4).enumerate() {
+        if group.len() == 4 {
+            group[0].attach_group(group_id, 4, true);
+            group[1].attach_group(group_id, 4, false);
+            group[2].attach_group(group_id, 4, false);
+            group[3].attach_group(group_id, 4, false);
+        }
+    }
+}
+
+/// Pair/group imbalance correction + dynamic primary switching.
+/// Call this periodically (e.g., every N requests).
+fn rebalance_groups(channels: &mut [HbmChannel]) {
+    // For now, just handle pairs/triplets/quads via chunks.
+    let len = channels.len();
+
+    // Pairs
+    for pair in channels.chunks_mut(2) {
+        if pair.len() == 2 {
+            let load_a = pair[0].metrics.load;
+            let load_b = pair[1].metrics.load;
+
+            pair[0].update_pair_affinity(load_b);
+            pair[1].update_pair_affinity(load_a);
+
+            pair[0].maybe_switch_primary(load_b);
+            pair[1].maybe_switch_primary(load_a);
+        }
+    }
+
+    // Triplets
+    for group in channels.chunks_mut(3) {
+        if group.len() == 3 {
+            let loads = [
+                group[0].metrics.load,
+                group[1].metrics.load,
+                group[2].metrics.load,
+            ];
+            let avg = (loads[0] + loads[1] + loads[2]) / 3.0;
+
+            for ch in group.iter_mut() {
+                ch.update_pair_affinity(avg);
+                ch.maybe_switch_primary(avg);
+            }
+        }
+    }
+
+    // Quads
+    for group in channels.chunks_mut(4) {
+        if group.len() == 4 {
+            let loads = [
+                group[0].metrics.load,
+                group[1].metrics.load,
+                group[2].metrics.load,
+                group[3].metrics.load,
+            ];
+            let avg = (loads[0] + loads[1] + loads[2] + loads[3]) / 4.0;
+
+            for ch in group.iter_mut() {
+                ch.update_pair_affinity(avg);
+                ch.maybe_switch_primary(avg);
+            }
+        }
+    }
+
+    // If you ever mix sizes, len is here if needed.
+    let _ = len;
+}
+
 pub fn run_stress_simulation() {
     let layer_count = 4;
     let mut rng = rand::thread_rng();
@@ -16,6 +105,11 @@ pub fn run_stress_simulation() {
         HbmChannel::new(2, 16, 0.85, layer_count),
         HbmChannel::new(3, 16, 0.85, layer_count),
     ];
+
+    // Choose grouping mode: pairs / triplets / quads
+    attach_pairs(&mut channels);
+    // attach_triplets(&mut channels);
+    // attach_quads(&mut channels);
 
     // Attach tunnel characteristics to a subset to showcase tunnel routing
     channels[2].attach_tunnel(
@@ -43,11 +137,16 @@ pub fn run_stress_simulation() {
     let mut low_exits = 0;
 
     for id in 0..total_requests {
+        // Periodic group rebalance
+        if id % 256 == 0 {
+            rebalance_groups(&mut ctrl.channels);
+        }
+
         // Randomize request properties
         let priority = match rng.gen_range(0..100) {
-            0..=5 => RequestPriority::High,      // small fraction: emergencies
-            6..=70 => RequestPriority::Standard, // majority: normal traffic
-            _ => RequestPriority::Low,          // background traffic
+            0..=5 => RequestPriority::High,
+            6..=70 => RequestPriority::Standard,
+            _ => RequestPriority::Low,
         };
 
         let kind = match rng.gen_range(0..3) {
@@ -70,7 +169,6 @@ pub fn run_stress_simulation() {
             layer_count,
         );
 
-        // Let the roundabout try to route this request
         let mut local_circulations = 0u32;
         for _ in 0..16 {
             if let Some(ch) = ctrl.route_request(req.clone()) {

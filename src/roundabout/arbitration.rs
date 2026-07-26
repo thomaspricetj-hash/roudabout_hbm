@@ -100,6 +100,9 @@ impl ArbitrationEngine {
         // Grid fused bias (cluster + zone + door + geom + locality)
         let grid_bias = ccg.fused_bias(channel.id);
 
+        // NEW: grouped‑pair contribution
+        let pair_component = channel.pair_score_component();
+
         // Composite arbitration score
         priority
             + index_score
@@ -108,6 +111,7 @@ impl ArbitrationEngine {
             + heat_affinity
             + locality
             + penalties
+            + pair_component
             - grid_bias
     }
 
@@ -123,7 +127,16 @@ impl ArbitrationEngine {
         channels
             .par_iter()
             .filter_map(|ch| {
-                if !ch.can_accept(req.bank_id) {
+                // find paired channel load if this channel is in a pair
+                let other_load = ch.pair_id.and_then(|pid| {
+                    channels
+                        .iter()
+                        .find(|c| c.pair_id == Some(pid) && c.id != ch.id)
+                        .map(|c| c.metrics.load)
+                });
+
+                // pair‑aware acceptance
+                if !ch.can_accept_with_pair(req.bank_id, other_load) {
                     return None;
                 }
 

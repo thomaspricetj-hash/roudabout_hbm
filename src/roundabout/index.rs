@@ -11,7 +11,6 @@ use super::{
 pub struct RoutingIndex;
 
 impl RoutingIndex {
-    /// Legacy sequential scoring (kept for compatibility)
     pub fn score_channel(
         request: &HbmRequest,
         channel: &HbmChannel,
@@ -35,8 +34,6 @@ impl RoutingIndex {
         score
     }
 
-    /// Legacy MAX‑tier parallel multilayer scoring (heatmap only)
-    /// Used by existing call sites that don't know about CrossConnectGrid yet.
     pub fn score_channel_parallel(
         request: &HbmRequest,
         channel: &HbmChannel,
@@ -71,8 +68,6 @@ impl RoutingIndex {
             .sum()
     }
 
-    /// MAX‑tier multilayer parallel scoring (Heatmap + CrossConnectGrid)
-    /// New path for grid‑aware routing.
     pub fn score_channel_parallel_with_grid(
         request: &HbmRequest,
         channel: &HbmChannel,
@@ -110,51 +105,43 @@ impl RoutingIndex {
             .sum()
     }
 
-    /// NEW: MAX‑tier HBM locality scoring
-    /// Adds row/bank/channel locality + refresh/ECC penalties
     pub fn locality_score(channel: &HbmChannel, heatmap: &Heatmap) -> f32 {
         let mut score = 0.0;
 
-        // row locality (strongest)
         score += heatmap.row_conflict[channel.id] * 0.40;
-
-        // bank locality
         score += heatmap.bank_busy[channel.id] * 0.35;
-
-        // channel saturation
         score += heatmap.channel_sat[channel.id] * 0.25;
 
-        // refresh penalty
         score -= heatmap.refresh_heat[channel.id] * 0.30;
-
-        // ECC penalty
         score -= heatmap.ecc_heat[channel.id] * 0.25;
 
         score
     }
 
-    /// NEW: MAX‑tier HBM geometry scoring
     pub fn geometry_score(channel: &HbmChannel, ccg: &CrossConnectGrid) -> f32 {
         let id = channel.id;
 
         let mut score = 0.0;
 
-        score += ccg.geom_bias[0][id] * 0.30; // row distance
-        score += ccg.geom_bias[1][id] * 0.25; // bank distance
-        score += ccg.geom_bias[2][id] * 0.20; // channel distance
-        score += ccg.geom_bias[3][id] * 0.15; // die distance
+        score += ccg.geom_bias[0][id] * 0.30;
+        score += ccg.geom_bias[1][id] * 0.25;
+        score += ccg.geom_bias[2][id] * 0.20;
+        score += ccg.geom_bias[3][id] * 0.15;
 
         score
     }
 
-    /// NEW: MAX‑tier HBM reliability scoring
     pub fn reliability_score(channel: &HbmChannel) -> f32 {
         (channel.metrics.stability_score * 0.50)
             - (channel.metrics.ecc_activity * 0.30)
             - (channel.metrics.refresh_pressure * 0.20)
     }
 
-    /// MAX‑tier composite index score (metrics + heatmap + grid + locality + geometry + reliability)
+    /// NEW: grouped‑pair index contribution
+    pub fn pair_index_score(channel: &HbmChannel) -> f32 {
+        channel.pair_score_component()
+    }
+
     pub fn composite_index_score(
         request: &HbmRequest,
         channel: &HbmChannel,
@@ -178,6 +165,7 @@ impl RoutingIndex {
         let locality = Self::locality_score(channel, heatmap);
         let geometry = Self::geometry_score(channel, ccg);
         let reliability = Self::reliability_score(channel);
+        let pair_score = Self::pair_index_score(channel);
 
         layer_score
             + channel_score
@@ -186,6 +174,8 @@ impl RoutingIndex {
             + locality
             + geometry
             + reliability
+            + pair_score
     }
 }
+
 

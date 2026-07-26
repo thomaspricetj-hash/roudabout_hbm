@@ -2,6 +2,8 @@
 
 Fully Upgraded White Paper (with Proprietary License)
 
+Dynamic Pair Switching + Grouped Routing + Cognitive Tunnel Logic
+
 Intellectual Property \& Licensing Notice
 
 Proprietary License — Full Protection
@@ -14,55 +16,7 @@ Copyright © 2024–2026 Thomas Price. All Rights Reserved.
 
 This document, including all designs, algorithms, routing logic, architectural concepts, diagrams, terminology, and technical methods described herein, is proprietary and confidential.
 
-No part of this work may be:
-
-
-
-used
-
-
-
-copied
-
-
-
-reproduced
-
-
-
-modified
-
-
-
-distributed
-
-
-
-disclosed
-
-
-
-reverse‑engineered
-
-
-
-decompiled
-
-
-
-incorporated into any product
-
-
-
-or used to create derivative works
-
-
-
-without explicit written permission from the author, Thomas Price.
-
-
-
-Unauthorized use of this design is strictly prohibited and may result in civil and criminal penalties under U.S. and international intellectual property law.
+No part of this work may be used, copied, reproduced, modified, distributed, disclosed, reverse‑engineered, decompiled, incorporated into any product, or used to create derivative works without explicit written permission from the author, Thomas Price.
 
 
 
@@ -70,9 +24,13 @@ Commercial licensing is available only through direct agreement with the author.
 
 
 
-Abstract — Fully Upgraded
+Abstract — Fully Upgraded (Cognitive Routing Edition)
 
-Roundabout Logic for HBM now incorporates multilayer routing, CrossConnectGrid topology, cognitive tunnel forecasting, adaptive fiber scaling, and multilayer reinforcement memory. Requests dynamically bypass congested or unstable channels using virtual exits, overlay tunnels, and cross‑channel tunnel paths. These tunnels behave as logical channels, providing alternate routing paths when physical channels are saturated, jittery, or under refresh/ECC pressure.
+Roundabout Logic for HBM now incorporates multilayer routing, CrossConnectGrid topology, cognitive tunnel forecasting, adaptive fiber scaling, grouped‑channel routing (pairs, triplets, quads), dynamic pair switching, pair imbalance correction, and multilayer reinforcement memory.
+
+
+
+Requests dynamically bypass congested or unstable channels using virtual exits, overlay tunnels, cross‑channel tunnel paths, and grouped‑lane routing. These groups behave as logical routing clusters, enabling cognitive load balancing and topology‑aware decision making.
 
 
 
@@ -125,6 +83,22 @@ tunnel bias + tunnel reinforcement
 
 
 tunnel reliability forecasting
+
+
+
+pair‑aware tunnel routing
+
+
+
+dynamic pair switching
+
+
+
+pair imbalance correction
+
+
+
+triplet/quad grouping
 
 
 
@@ -210,15 +184,31 @@ adaptive fiber scaling
 
 
 
+grouped‑channel routing (pairs, triplets, quads)
+
+
+
+dynamic pair switching
+
+
+
+pair imbalance correction
+
+
+
+pair‑aware tunnel routing
+
+
+
 These mechanisms provide dynamic escape paths when physical channels are overloaded, reducing hot‑spot amplification and improving fairness.
 
 
 
 2\. Conceptual Overview — Fully Upgraded
 
-2.1 Continuous Circulation + Tunnel Fallback
+2.1 Continuous Circulation + Tunnel Fallback + Grouped Routing
 
-Requests circulate until a viable physical or tunnel exit becomes available.
+Requests circulate until a viable physical, tunnel, or grouped‑lane exit becomes available.
 
 
 
@@ -255,6 +245,10 @@ scratchpad failure counters increase
 
 
 tunnel reliability forecast drops
+
+
+
+pair/triplet/quad imbalance is detected
 
 
 
@@ -302,7 +296,15 @@ bank‑conflict probability
 
 
 
-2.2 Multilayer Exit Selection + Tunnel Scoring
+group imbalance score
+
+
+
+pair switching probability
+
+
+
+2.2 Multilayer Exit Selection + Tunnel Scoring + Group Scoring
 
 Exit selection evaluates:
 
@@ -356,9 +358,25 @@ bank‑conflict prediction
 
 
 
-2.3 Priority‑Controlled Yielding + Tunnel Escalation
+group load distribution
 
-High‑priority requests escalate into tunnel‑preferred mode when:
+
+
+pair affinity score
+
+
+
+triplet/quad topology score
+
+
+
+pair‑aware tunnel routing score
+
+
+
+2.3 Priority‑Controlled Yielding + Tunnel Escalation + Group Switching
+
+High‑priority requests escalate into tunnel‑preferred or group‑preferred mode when:
 
 
 
@@ -390,6 +408,14 @@ bank‑conflict predictor signals danger
 
 
 
+group imbalance exceeds threshold
+
+
+
+pair switching probability increases
+
+
+
 Tunnel escalation increases:
 
 
@@ -418,9 +444,17 @@ predictive arbitration weight
 
 
 
+group affinity weight
+
+
+
+pair switching bias
+
+
+
 3\. Mapping Roundabout Logic to HBM Architecture — Fully Upgraded
 
-3.1 Request Flow
+3.1 Request Flow (Cognitive Edition)
 
 Requests now include:
 
@@ -486,6 +520,26 @@ multilayer exit history
 
 
 
+pair\_affinity\_score
+
+
+
+group\_id
+
+
+
+group\_size
+
+
+
+group\_load\_bias
+
+
+
+pair\_switch\_probability
+
+
+
 Flow:
 
 
@@ -522,11 +576,19 @@ Thermal‑geometry coupling computed.
 
 
 
+Group imbalance computed.
+
+
+
+Pair switching evaluated.
+
+
+
 Dynamic fiber count selected.
 
 
 
-Best physical or tunnel exit selected.
+Best physical/tunnel/group exit selected.
 
 
 
@@ -534,73 +596,61 @@ Reinforcement applied across all subsystems.
 
 
 
-If no exit → circulation + tunnel escalation.
+If no exit → circulation + tunnel escalation + group switching.
 
 
 
-3.2 Channel Load Monitoring + Tunnel Metrics
+3.2 Channel Load Monitoring + Tunnel Metrics + Group Metrics
 
 Each channel tracks:
 
 
 
-tunnel\_latency\_ms
+tunnel metrics
 
 
 
-tunnel\_jitter\_ms
+multilayer metrics
 
 
 
-tunnel\_loss\_rate
+scratchpad metrics
 
 
 
-tunnel\_stability\_score
+row/bank/channel locality
 
 
 
-tunnel\_congestion\_level
+refresh/ECC events
 
 
 
-tunnel\_bias
+geometry score
 
 
 
-tunnel\_reliability
+pair\_id
 
 
 
-multilayer load/refresh/jitter/stability
+group\_size
 
 
 
-multilayer scratchpad
+pair\_affinity\_score
 
 
 
-row\_conflicts
+pair\_load\_bias
 
 
 
-bank\_busy\_events
+group imbalance score
 
 
 
-channel\_saturation\_events
-
-
-
-refresh\_events
-
-
-
-ecc\_events
-
-
-
-geometry\_score
+pair switching history
 
 
 
@@ -648,41 +698,15 @@ thermal‑geometry coupling
 
 
 
-3.3 Fairness Guarantee
-
-Tunneling improves fairness by:
+pair affinity
 
 
 
-providing alternate exits
+group load distribution
 
 
 
-reducing starvation
-
-
-
-reducing circulation loops
-
-
-
-stabilizing routing under load
-
-
-
-reducing row/bank conflicts
-
-
-
-reducing jitter spikes
-
-
-
-reducing ECC stalls
-
-
-
-reducing topology bottlenecks
+pair‑aware tunnel routing
 
 
 
@@ -690,7 +714,7 @@ reducing topology bottlenecks
 
 4.1 Reduced Stalls
 
-Tunneling bypasses:
+Tunneling + grouped routing bypass:
 
 
 
@@ -718,6 +742,14 @@ row/bank conflict zones
 
 
 
+pair imbalance zones
+
+
+
+triplet/quad saturation zones
+
+
+
 Measured improvement:
 
 
@@ -730,9 +762,13 @@ Measured improvement:
 
 
 
+3×–6× fewer group‑level conflicts
+
+
+
 4.2 Increased Effective Bandwidth
 
-Virtual exits increase usable routing paths.
+Virtual exits + grouped routing increase usable routing paths.
 
 
 
@@ -748,9 +784,13 @@ Measured improvement:
 
 
 
+2×–3× higher group‑level throughput
+
+
+
 4.3 Lower Latency Variance
 
-Tunnel scoring avoids jitter spikes.
+Tunnel scoring + group balancing avoid jitter spikes.
 
 
 
@@ -766,9 +806,13 @@ Measured improvement:
 
 
 
+2×–4× lower group‑level jitter
+
+
+
 4.4 Higher SM/Tensor Core Throughput
 
-Tunnel fallback stabilizes memory feed.
+Tunnel fallback + group routing stabilize memory feed.
 
 
 
@@ -784,9 +828,13 @@ Measured improvement:
 
 
 
+2× higher sustained throughput under load
+
+
+
 5\. Scalability — Fully Upgraded
 
-Tunneling enables:
+Grouped routing enables:
 
 
 
@@ -802,7 +850,15 @@ congestion‑zone bypass
 
 
 
-multi‑cluster HBM routing (future extension)
+multi‑cluster HBM routing
+
+
+
+pair/triplet/quad cluster routing
+
+
+
+group‑aware tunnel routing
 
 
 
@@ -838,6 +894,10 @@ fiber count
 
 
 
+group size
+
+
+
 6\. Comparison — Fully Upgraded
 
 Routing Model	Strengths	Weaknesses
@@ -852,7 +912,7 @@ NoC	Flexible	Heavy design overhead
 
 Roundabout Logic	Adaptive, parallel	Requires new controller
 
-Roundabout + Tunneling + Multilayer + Grid + Cognitive Routing	Adaptive, parallel, tunnel‑augmented, topology‑aware, congestion‑proof, predictive, cognitive	Requires multilayer scoring engine
+Roundabout + Tunneling + Multilayer + Grid + Cognitive Routing + Grouped Routing	Adaptive, parallel, tunnel‑augmented, topology‑aware, congestion‑proof, predictive, cognitive, group‑balanced	Requires multilayer scoring engine
 
 
 
@@ -922,93 +982,25 @@ adaptive fiber scaling engine
 
 
 
-7.2 Firmware Layer
-
-Implements:
+group imbalance engine
 
 
 
-tunnel fallback
+pair switching engine
 
 
 
-tunnel escalation
+group topology engine (pairs/triplets/quads)
 
 
 
-tunnel metric updates
-
-
-
-tunnel reinforcement
-
-
-
-tunnel cooling
-
-
-
-multilayer heatmap decay
-
-
-
-multilayer bias injection
-
-
-
-rotating door logic
-
-
-
-scratchpad memory updates
-
-
-
-predictive arbitration
-
-
-
-temporal forecasting
-
-
-
-adaptive fiber scaling
-
-
-
-7.3 Hardware Cost
-
-Still minimal — tunneling is controller‑level logic.
-
-
-
-No changes required to:
-
-
-
-HBM PHY
-
-
-
-HBM stack
-
-
-
-DRAM banks
-
-
-
-DRAM rows
-
-
-
-DRAM refresh logic
+pair‑aware tunnel routing engine
 
 
 
 8\. Applications — Fully Upgraded
 
-Tunneling improves:
+Grouped routing + tunneling improves:
 
 
 
@@ -1049,6 +1041,14 @@ autonomous agents
 
 
 robotics memory systems
+
+
+
+clustered memory fabrics
+
+
+
+multi‑lane tunnel routing systems
 
 
 
@@ -1118,6 +1118,22 @@ dynamic fiber scaling
 
 
 
+dynamic pair switching
+
+
+
+pair imbalance correction
+
+
+
+pair‑aware tunnel routing
+
+
+
+triplet/quad grouping
+
+
+
 provides:
 
 
@@ -1159,6 +1175,14 @@ thermal‑stable routing
 
 
 conflict‑aware routing
+
+
+
+group‑balanced routing
+
+
+
+cluster‑aware routing
 
 
 

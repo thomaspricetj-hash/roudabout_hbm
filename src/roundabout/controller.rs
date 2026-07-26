@@ -154,11 +154,6 @@ impl HbmRoundaboutController {
         }
     }
 
-    /// MAX‑tier parallel routing + multilayer Cross‑Connect Grid + tunneling + scratchpad
-    /// with splitting‑cascade multi‑fiber routing, cascading cache, locality/tunnel/geometry fusion,
-    /// predictive arbitration, temporal heatmap forecasting, row‑hammer avoidance,
-    /// temporal tunnel forecasting, bank‑conflict prediction, thermal‑geometry coupling,
-    /// and adaptive fiber count.
     pub fn route_request(&mut self, mut req: HbmRequest) -> Option<usize> {
         req.touch_attempt();
         self.heatmap.decay_step();
@@ -336,23 +331,15 @@ impl HbmRoundaboutController {
 
                     // ---------- RULES OF THE ROAD APPLIED HERE ----------
 
-                    // No‑U‑turn / backtracking
                     route_score += no_u_turn_penalty(scratchpad, ch, 3);
-
-                    // Yield to existing flows (stability bias)
                     route_score += stability_yield_bias(scratchpad, ch, 0.05);
-
-                    // Emergency preemption
                     route_score += emergency_preempt_bonus(&fiber_req);
-
-                    // Construction zones (overheated channels)
                     route_score += construction_zone_penalty(heatmap, ch);
-
-                    // Lane discipline (placeholder for future lane types)
                     route_score += lane_discipline_penalty(&fiber_req, &channels[ch]);
-
-                    // Speed limits / rate limiting
                     route_score += speed_limit_penalty(&channels[ch]);
+
+                    // NEW: grouped‑pair routing contribution
+                    route_score += channels[ch].pair_score_component();
 
                     // ----------------------------------------------------
 
@@ -472,5 +459,4 @@ impl HbmRoundaboutController {
         }
     }
 }
-
 
