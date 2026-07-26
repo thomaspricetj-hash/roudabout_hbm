@@ -38,7 +38,6 @@ fn attach_quads(channels: &mut [HbmChannel]) {
 /// Pair/group imbalance correction + dynamic primary switching.
 /// Call this periodically (e.g., every N requests).
 fn rebalance_groups(channels: &mut [HbmChannel]) {
-    // For now, just handle pairs/triplets/quads via chunks.
     let len = channels.len();
 
     // Pairs
@@ -90,7 +89,6 @@ fn rebalance_groups(channels: &mut [HbmChannel]) {
         }
     }
 
-    // If you ever mix sizes, len is here if needed.
     let _ = len;
 }
 
@@ -106,26 +104,11 @@ pub fn run_stress_simulation() {
         HbmChannel::new(3, 16, 0.85, layer_count),
     ];
 
-    // Choose grouping mode: pairs / triplets / quads
     attach_pairs(&mut channels);
-    // attach_triplets(&mut channels);
-    // attach_quads(&mut channels);
 
-    // Attach tunnel characteristics to a subset to showcase tunnel routing
-    channels[2].attach_tunnel(
-        1.5,   // latency_ms
-        0.3,   // jitter_ms
-        0.01,  // loss_rate
-        1.2,   // stability
-        0.25,  // congestion
-    );
-    channels[3].attach_tunnel(
-        3.0,
-        0.8,
-        0.03,
-        0.9,
-        0.6,
-    );
+    // Attach tunnel characteristics
+    channels[2].attach_tunnel(1.5, 0.3, 0.01, 1.2, 0.25);
+    channels[3].attach_tunnel(3.0, 0.8, 0.03, 0.9, 0.6);
 
     let mut ctrl = HbmRoundaboutController::new(channels, layer_count, 0.85);
 
@@ -137,12 +120,10 @@ pub fn run_stress_simulation() {
     let mut low_exits = 0;
 
     for id in 0..total_requests {
-        // Periodic group rebalance
         if id % 256 == 0 {
             rebalance_groups(&mut ctrl.channels);
         }
 
-        // Randomize request properties
         let priority = match rng.gen_range(0..100) {
             0..=5 => RequestPriority::High,
             6..=70 => RequestPriority::Standard,
@@ -159,6 +140,9 @@ pub fn run_stress_simulation() {
         let bank_id = rng.gen_range(0..16);
         let row_addr: u64 = rng.gen_range(0..0xFFFF);
 
+        // ============================================================
+        // FIXED: HbmRequest::new now requires raw_payload + profile
+        // ============================================================
         let mut req = HbmRequest::new(
             id as u64,
             start_channel,
@@ -167,6 +151,8 @@ pub fn run_stress_simulation() {
             priority,
             kind,
             layer_count,
+            vec![],     // <-- FIX: raw_payload
+            "sim",      // <-- FIX: profile
         );
 
         let mut local_circulations = 0u32;

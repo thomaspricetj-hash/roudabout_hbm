@@ -1,6 +1,15 @@
 use rayon::prelude::*;
 use std::time::Instant;
 
+// BitDrop‑V2 integration
+use bitdrop_v2::{
+    compress_with_profile,
+    estimate_entropy,
+    looks_like_text_or_structured,
+    looks_like_u32_counter,
+    gpu_available,
+};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequestPriority {
     High,
@@ -56,6 +65,14 @@ pub struct HbmRequest {
     pub tunnel_history: Vec<Option<usize>>,
     pub tunnel_heat: f32,
     pub tunnel_score: f32,
+
+    // BitDrop‑V2 integration
+    pub payload: Vec<u8>,
+    pub payload_profile: String,
+    pub payload_entropy: f32,
+    pub payload_is_structured: bool,
+    pub payload_is_numeric_counter: bool,
+    pub payload_compressed_size: usize,
 }
 
 impl HbmRequest {
@@ -67,8 +84,34 @@ impl HbmRequest {
         priority: RequestPriority,
         kind: RequestKind,
         layers: usize,
+        raw_payload: Vec<u8>,
+        profile: &str,
     ) -> Self {
         let now = Instant::now();
+
+        // BitDrop profiling
+        let entropy = estimate_entropy(&raw_payload);
+        let is_structured = looks_like_text_or_structured(&raw_payload);
+        let is_numeric = looks_like_u32_counter(&raw_payload);
+
+        // Choose effective profile
+        let effective_profile = if profile.is_empty() {
+            if is_numeric {
+                "numbin"
+            } else if is_structured {
+                "pymid"
+            } else if gpu_available() {
+                "adaptive"
+            } else {
+                "fast"
+            }
+        } else {
+            profile
+        };
+
+        let compressed = compress_with_profile(&raw_payload, effective_profile);
+        let compressed_size = compressed.len();
+
         Self {
             id,
             priority,
@@ -103,6 +146,13 @@ impl HbmRequest {
             tunnel_history: vec![None; layers],
             tunnel_heat: 0.0,
             tunnel_score: 0.0,
+
+            payload: compressed,
+            payload_profile: effective_profile.to_string(),
+            payload_entropy: entropy,
+            payload_is_structured: is_structured,
+            payload_is_numeric_counter: is_numeric,
+            payload_compressed_size: compressed_size,
         }
     }
 
@@ -138,8 +188,42 @@ impl HbmRequest {
         }
     }
 
+    pub fn payload_size_bias(&self) -> f32 {
+        let s = self.payload_compressed_size as f32;
+        (1_000_000.0 / (s.max(64.0))).min(10.0)
+    }
+
+    pub fn payload_entropy_bias(&self) -> f32 {
+        (8.0 - self.payload_entropy).clamp(-4.0, 4.0)
+    }
+
+    pub fn payload_structure_bias(&self) -> f32 {
+        if self.payload_is_structured {
+            1.5
+        } else {
+            0.0
+        }
+    }
+
+    pub fn payload_numeric_bias(&self) -> f32 {
+        if self.payload_is_numeric_counter {
+            2.0
+        } else {
+            0.0
+        }
+    }
+
     pub fn update_route_score(&mut self, score: f32) {
-        self.route_score = score;
+        let size_bias = self.payload_size_bias();
+        let entropy_bias = self.payload_entropy_bias();
+        let struct_bias = self.payload_structure_bias();
+        let numeric_bias = self.payload_numeric_bias();
+
+        self.route_score = score
+            + size_bias * 0.05
+            + entropy_bias * 0.03
+            + struct_bias * 0.02
+            + numeric_bias * 0.02;
     }
 
     pub fn update_last_exit(&mut self, channel: Option<usize>) {
@@ -217,4 +301,3 @@ impl HbmRequest {
         self.circulations = self.circulations.saturating_add(1);
     }
 }
-

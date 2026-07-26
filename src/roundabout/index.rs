@@ -100,7 +100,23 @@ impl RoutingIndex {
 
                 let door_rot = ccg.door_rotation[layer][channel.id] as f32 * 0.01;
 
-                base + req_bias + heat + scratch + door_rot - grid_bias
+                // BitDrop‑aware per‑layer coupling: request + channel + locality/tunnel
+                let bitdrop_layer =
+                    request.locality_score * 0.02 +
+                    request.refresh_pressure * 0.02 +
+                    request.ecc_pressure * 0.02 +
+                    request.tunnel_preference * 0.03 +
+                    request.tunnel_heat * 0.02 +
+                    request.tunnel_score * 0.03 +
+                    (1.0 - request.stability_factor) * 0.02 +
+                    (request.adaptive_weight - 1.0) * 0.02 +
+                    channel.locality_score * 0.02 +
+                    channel.heat_affinity * 0.02 +
+                    (1.0 - channel.reliability_score) * 0.03 +
+                    channel.tunnel_bias * 0.03 +
+                    (1.0 - channel.tunnel_reliability) * 0.03;
+
+                base + req_bias + heat + scratch + door_rot + bitdrop_layer - grid_bias
             })
             .sum()
     }
@@ -142,6 +158,49 @@ impl RoutingIndex {
         channel.pair_score_component()
     }
 
+    /// NEW: BitDrop‑aware request‑side index component
+    pub fn bitdrop_request_index(request: &HbmRequest) -> f32 {
+        let mut score = 0.0;
+
+        score += request.locality_score * 0.08;
+        score += request.refresh_pressure * 0.06;
+        score += request.ecc_pressure * 0.06;
+
+        score += request.tunnel_preference * 0.08;
+        score += request.tunnel_heat * 0.05;
+        score += request.tunnel_score * 0.07;
+
+        score += (request.adaptive_weight - 1.0) * 0.05;
+        score += (1.0 - request.stability_factor) * 0.05;
+
+        if request.is_tunnel_escalated {
+            score += 0.06;
+        }
+
+        score
+    }
+
+    /// NEW: BitDrop‑aware channel‑side index component
+    pub fn bitdrop_channel_index(channel: &HbmChannel) -> f32 {
+        let mut score = 0.0;
+
+        score += channel.heat_affinity * 0.06;
+        score += channel.locality_score * 0.07;
+
+        score += (1.0 - channel.reliability_score) * 0.08;
+
+        if channel.is_tunnel {
+            score += channel.tunnel_bias * 0.08;
+            score += (1.0 - channel.tunnel_reliability) * 0.07;
+        }
+
+        if channel.group_size > 1 {
+            score += (channel.group_size as f32 - 1.0) * 0.02;
+        }
+
+        score
+    }
+
     pub fn composite_index_score(
         request: &HbmRequest,
         channel: &HbmChannel,
@@ -167,6 +226,9 @@ impl RoutingIndex {
         let reliability = Self::reliability_score(channel);
         let pair_score = Self::pair_index_score(channel);
 
+        let bitdrop_req = Self::bitdrop_request_index(request);
+        let bitdrop_ch = Self::bitdrop_channel_index(channel);
+
         layer_score
             + channel_score
             + fused_heat
@@ -175,7 +237,8 @@ impl RoutingIndex {
             + geometry
             + reliability
             + pair_score
+            + bitdrop_req
+            + bitdrop_ch
     }
 }
-
 

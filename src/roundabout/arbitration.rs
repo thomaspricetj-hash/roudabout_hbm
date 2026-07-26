@@ -25,7 +25,7 @@ impl ArbitrationEngine {
         }
     }
 
-    /// NEW: HBM‑aware priority escalation
+    /// HBM‑aware priority escalation
     pub fn hbm_priority_escalation(req: &HbmRequest) -> f32 {
         let mut esc = 0.0;
 
@@ -41,6 +41,15 @@ impl ArbitrationEngine {
         if req.ecc_pressure > 0.5 {
             esc -= 0.05;
         }
+
+        // tunnel escalation
+        if req.is_tunnel_escalated {
+            esc -= 0.08;
+        }
+
+        // adaptive weight / stability factor coupling
+        esc += (req.adaptive_weight - 1.0) * 0.03;
+        esc += (1.0 - req.stability_factor) * 0.02;
 
         esc
     }
@@ -86,22 +95,40 @@ impl ArbitrationEngine {
             .map(|layer| layer.get(channel.id).copied().unwrap_or(0.0))
             .sum::<f32>();
 
-        // NEW: HBM locality contribution
+        // HBM locality contribution
         let locality =
             heatmap.row_conflict[channel.id] * 0.40 +
             heatmap.bank_busy[channel.id] * 0.35 +
             heatmap.channel_sat[channel.id] * 0.25;
 
-        // NEW: refresh/ECC penalties
+        // refresh/ECC penalties (fixed sign)
         let penalties =
             -heatmap.refresh_heat[channel.id] * 0.30 -
-            -heatmap.ecc_heat[channel.id] * 0.25;
+            heatmap.ecc_heat[channel.id] * 0.25;
 
         // Grid fused bias (cluster + zone + door + geom + locality)
         let grid_bias = ccg.fused_bias(channel.id);
 
-        // NEW: grouped‑pair contribution
+        // grouped‑pair contribution
         let pair_component = channel.pair_score_component();
+
+        // channel‑side BitDrop / tunnel / locality contributions
+        let channel_bitdrop_component =
+            channel.heat_affinity * 0.05 +
+            (1.0 - channel.reliability_score) * 0.10 +
+            channel.locality_score * 0.06 +
+            channel.tunnel_bias * 0.08 +
+            (1.0 - channel.tunnel_reliability) * 0.07;
+
+        // request‑side tunnel / locality / stability coupling
+        let request_bitdrop_component =
+            req.locality_score * 0.06 +
+            req.refresh_pressure * 0.05 +
+            req.ecc_pressure * 0.05 +
+            req.tunnel_preference * 0.08 +
+            req.tunnel_heat * 0.04 +
+            req.tunnel_score * 0.06 +
+            (1.0 - req.stability_factor) * 0.05;
 
         // Composite arbitration score
         priority
@@ -112,10 +139,71 @@ impl ArbitrationEngine {
             + locality
             + penalties
             + pair_component
+            + channel_bitdrop_component
+            + request_bitdrop_component
             - grid_bias
     }
 
-    /// Parallel arbitration across all channels
+    /// Parallel arbitration across all channels (BitDrop‑aware)
+    pub fn choose_best_channel_parallel_with_payload(
+        &self,
+        req: &HbmRequest,
+        channels: &[HbmChannel],
+        heatmap: &Heatmap,
+        ccg: &CrossConnectGrid,
+        layer_count: usize,
+        raw_payload: &[u8],
+        profile_hint: Option<&str>,
+    ) -> Option<usize> {
+        channels
+            .par_iter()
+            .filter_map(|ch| {
+                // update BitDrop‑V2 biases per‑channel for this payload
+                let mut ch_clone = ch.clone();
+                ch_clone.update_bitdrop_biases(raw_payload, profile_hint);
+
+                // find paired channel load if this channel is in a pair
+                let other_load = ch_clone.pair_id.and_then(|pid| {
+                    channels
+                        .iter()
+                        .find(|c| c.pair_id == Some(pid) && c.id != ch_clone.id)
+                        .map(|c| c.metrics.load)
+                });
+
+                // pair‑aware acceptance
+                if !ch_clone.can_accept_with_pair(req.bank_id, other_load) {
+                    return None;
+                }
+
+                let mut score = Self::arbitration_score_parallel(
+                    req,
+                    &ch_clone,
+                    heatmap,
+                    ccg,
+                    layer_count,
+                );
+
+                // tunnel‑escalation routing preference
+                if req.is_tunnel_escalated {
+                    if ch_clone.is_tunnel {
+                        score -= 0.10;
+                    } else {
+                        score += 0.05;
+                    }
+                }
+
+                // group size awareness (pairs/triplets/quads)
+                if ch_clone.group_size > 1 {
+                    score -= (ch_clone.group_size as f32 - 1.0) * 0.02;
+                }
+
+                Some((ch_clone.id, score))
+            })
+            .min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(id, _)| id)
+    }
+
+    /// Original parallel arbitration across all channels (kept for compatibility)
     pub fn choose_best_channel_parallel(
         &self,
         req: &HbmRequest,
@@ -140,13 +228,27 @@ impl ArbitrationEngine {
                     return None;
                 }
 
-                let score = Self::arbitration_score_parallel(
+                let mut score = Self::arbitration_score_parallel(
                     req,
                     ch,
                     heatmap,
                     ccg,
                     layer_count,
                 );
+
+                // tunnel‑escalation routing preference
+                if req.is_tunnel_escalated {
+                    if ch.is_tunnel {
+                        score -= 0.10;
+                    } else {
+                        score += 0.05;
+                    }
+                }
+
+                // group size awareness (pairs/triplets/quads)
+                if ch.group_size > 1 {
+                    score -= (ch.group_size as f32 - 1.0) * 0.02;
+                }
 
                 Some((ch.id, score))
             })

@@ -21,6 +21,11 @@ pub struct Heatmap {
     pub channel_sat: Vec<f32>,        // channel saturation heat
     pub refresh_heat: Vec<f32>,       // refresh cycle heat
     pub ecc_heat: Vec<f32>,           // ECC correction heat
+
+    // NEW: BitDrop-aware multilayer metrics
+    pub bitdrop_payload_heat: Vec<f32>,   // payload size / entropy / structure heat
+    pub bitdrop_tunnel_heat: Vec<f32>,    // tunnel preference / tunnel physics heat
+    pub bitdrop_locality_heat: Vec<f32>,  // locality + numeric-counter coupling heat
 }
 
 impl Heatmap {
@@ -41,6 +46,11 @@ impl Heatmap {
             channel_sat: vec![0.0; channel_count],
             refresh_heat: vec![0.0; channel_count],
             ecc_heat: vec![0.0; channel_count],
+
+            // NEW: BitDrop multilayer heat sources
+            bitdrop_payload_heat: vec![0.0; channel_count],
+            bitdrop_tunnel_heat: vec![0.0; channel_count],
+            bitdrop_locality_heat: vec![0.0; channel_count],
         }
     }
 
@@ -56,6 +66,11 @@ impl Heatmap {
         self.channel_sat.par_iter_mut().for_each(|v| *v *= self.decay);
         self.refresh_heat.par_iter_mut().for_each(|v| *v *= self.decay);
         self.ecc_heat.par_iter_mut().for_each(|v| *v *= self.decay);
+
+        // NEW: decay BitDrop-specific layers
+        self.bitdrop_payload_heat.par_iter_mut().for_each(|v| *v *= self.decay);
+        self.bitdrop_tunnel_heat.par_iter_mut().for_each(|v| *v *= self.decay);
+        self.bitdrop_locality_heat.par_iter_mut().for_each(|v| *v *= self.decay);
     }
 
     /// Parallel heat injection across layers
@@ -102,6 +117,27 @@ impl Heatmap {
         }
     }
 
+    /// NEW: BitDrop payload heat injection
+    pub fn add_bitdrop_payload_heat(&mut self, channel: usize, amount: f32) {
+        if let Some(v) = self.bitdrop_payload_heat.get_mut(channel) {
+            *v += amount;
+        }
+    }
+
+    /// NEW: BitDrop tunnel heat injection
+    pub fn add_bitdrop_tunnel_heat(&mut self, channel: usize, amount: f32) {
+        if let Some(v) = self.bitdrop_tunnel_heat.get_mut(channel) {
+            *v += amount;
+        }
+    }
+
+    /// NEW: BitDrop locality heat injection
+    pub fn add_bitdrop_locality_heat(&mut self, channel: usize, amount: f32) {
+        if let Some(v) = self.bitdrop_locality_heat.get_mut(channel) {
+            *v += amount;
+        }
+    }
+
     /// Parallel normalization: keeps heatmap stable under heavy load
     pub fn normalize(&mut self) {
         self.layers.par_iter_mut().for_each(|layer_vec| {
@@ -126,6 +162,11 @@ impl Heatmap {
         normalize_vec(&mut self.channel_sat);
         normalize_vec(&mut self.refresh_heat);
         normalize_vec(&mut self.ecc_heat);
+
+        // NEW: normalize BitDrop-specific layers
+        normalize_vec(&mut self.bitdrop_payload_heat);
+        normalize_vec(&mut self.bitdrop_tunnel_heat);
+        normalize_vec(&mut self.bitdrop_locality_heat);
     }
 
     /// Parallel reinforcement: boost channels that recently succeeded
@@ -192,7 +233,7 @@ impl Heatmap {
         }
     }
 
-    /// fused multilayer heat score (HBM-aware)
+    /// fused multilayer heat score (HBM + BitDrop-aware)
     pub fn fused_heat(&self, channel: usize) -> f32 {
         let mut acc = 0.0;
 
@@ -207,6 +248,11 @@ impl Heatmap {
         acc += self.channel_sat[channel] * 0.25;
         acc += self.refresh_heat[channel] * 0.20;
         acc += self.ecc_heat[channel] * 0.15;
+
+        // NEW: BitDrop payload / tunnel / locality heat sources
+        acc += self.bitdrop_payload_heat[channel] * 0.25;
+        acc += self.bitdrop_tunnel_heat[channel] * 0.20;
+        acc += self.bitdrop_locality_heat[channel] * 0.20;
 
         acc
     }

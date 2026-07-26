@@ -1,0 +1,68 @@
+[package]
+name = "bitdrop_v2"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "bitdrop_v2"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Python bindings
+pyo3 = { version = "0.21", features = ["extension-module"] }
+
+# Compression + utilities
+flate2 = { version = "1", features = ["zlib"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+byteorder = "1"
+itertools = "0.13"
+rayon = "1.10"
+zstd = "0.13"
+lz4_flex = "0.11"
+
+# Hashing (required by collapse.rs)
+ahash = "0.8"
+
+# Serialization for GlobalModel + persistent cache
+bincode = "1.3"
+
+# ============================================================
+# GPU BACKEND (WGPU ONLY — CUDA REMOVED)
+# ============================================================
+
+# Universal GPU backend (AMD, Intel, NVIDIA, Apple Silicon)
+wgpu = "0.19"
+
+# Async + buffer mapping for WGPU
+futures-lite = "2.2"
+futures-intrusive = "0.5"
+
+# Zero‑copy GPU buffer casting
+bytemuck = { version = "1.14", features = ["derive"] }
+
+# Global backend singleton
+once_cell = "1.19"
+
+# ============================================================
+# NEW: Persistent collapse cache + decay
+# ============================================================
+
+# Thread‑safe concurrent map
+dashmap = "6"
+
+# OS‑safe cache directory (AppData/Local on Windows)
+directories = "5"
+
+# High‑precision timestamps for decay
+chrono = { version = "0.4", features = ["serde"] }
+
+[dev-dependencies]
+# Benchmark dependencies
+rand = "0.8"
+
+[[bench]]
+name = "bitdrop_bench"
+path = "benches/bitdrop_bench.rs"
+harness = false

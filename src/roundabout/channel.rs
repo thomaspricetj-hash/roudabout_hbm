@@ -6,6 +6,15 @@ use super::{
     grid::CrossConnectGrid,
 };
 
+// BitDrop‑V2 integration
+use bitdrop_v2::{
+    compress_with_profile,
+    estimate_entropy,
+    looks_like_text_or_structured,
+    looks_like_u32_counter,
+    gpu_available,
+};
+
 #[derive(Debug, Clone)]
 pub struct BankState {
     pub bank_id: usize,
@@ -37,6 +46,12 @@ pub struct HbmChannel {
 
     // group size (2 = pair, 3 = triplet, 4 = quad)
     pub group_size: usize,
+
+    // BitDrop‑aware channel hints
+    pub payload_entropy_bias: f32,
+    pub payload_size_bias: f32,
+    pub payload_structure_bias: f32,
+    pub payload_numeric_bias: f32,
 }
 
 impl HbmChannel {
@@ -68,7 +83,42 @@ impl HbmChannel {
             pair_load_bias: 0.0,
 
             group_size: 1,
+
+            payload_entropy_bias: 0.0,
+            payload_size_bias: 0.0,
+            payload_structure_bias: 0.0,
+            payload_numeric_bias: 0.0,
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // BitDrop‑aware payload scoring (per‑channel)
+    // -------------------------------------------------------------------------
+
+    pub fn update_bitdrop_biases(&mut self, raw_payload: &[u8], profile_hint: Option<&str>) {
+        let entropy = estimate_entropy(raw_payload);
+        let is_structured = looks_like_text_or_structured(raw_payload);
+        let is_numeric = looks_like_u32_counter(raw_payload);
+
+        let profile = if let Some(p) = profile_hint {
+            p
+        } else if is_numeric {
+            "numbin"
+        } else if is_structured {
+            "pymid"
+        } else if gpu_available() {
+            "adaptive"
+        } else {
+            "fast"
+        };
+
+        let compressed = compress_with_profile(raw_payload, profile);
+        let size = compressed.len() as f32;
+
+        self.payload_size_bias = (1_000_000.0 / size.max(64.0)).min(10.0);
+        self.payload_entropy_bias = (8.0 - entropy).clamp(-4.0, 4.0);
+        self.payload_structure_bias = if is_structured { 1.5 } else { 0.0 };
+        self.payload_numeric_bias = if is_numeric { 2.0 } else { 0.0 };
     }
 
     // -------------------------------------------------------------------------
@@ -175,7 +225,6 @@ impl HbmChannel {
         self.group_size = 1;
     }
 
-    /// Pair imbalance correction: adjust affinity/load bias based on peer load.
     pub fn update_pair_affinity(&mut self, other_load: f32) {
         let load_delta = self.metrics.load - other_load;
 
@@ -186,36 +235,30 @@ impl HbmChannel {
             (self.pair_load_bias + (-load_delta * 0.05)).clamp(-0.20, 0.20);
     }
 
-    /// Dynamic pair switching: flip primary/secondary when imbalance is too high.
     pub fn maybe_switch_primary(&mut self, other_load: f32) {
         let load_delta = self.metrics.load - other_load;
 
-        // If secondary is much lighter, let it become primary.
         if !self.is_pair_primary && load_delta < -0.30 {
             self.is_pair_primary = true;
             self.pair_load_bias = -0.05;
         }
 
-        // If primary is much heavier, demote it.
         if self.is_pair_primary && load_delta > 0.30 {
             self.is_pair_primary = false;
             self.pair_load_bias = 0.0;
         }
     }
 
-    /// Pair‑aware tunnel routing: extra bias when group contains tunnels.
     pub fn tunnel_pair_component(&self) -> f32 {
         if !self.is_tunnel || self.pair_id.is_none() {
             return 0.0;
         }
 
-        // Favor stable, low‑loss tunnels inside a group.
         let base =
             (1.0 - self.metrics.tunnel_loss_rate) * 0.10
             + (self.metrics.tunnel_stability_score * 0.10)
             - (self.metrics.tunnel_congestion_level * 0.05);
 
-        // Primary tunnel in a group gets a small extra bias.
         let primary_bonus = if self.is_pair_primary { 0.03 } else { 0.0 };
 
         base + primary_bonus
@@ -335,8 +378,16 @@ impl HbmChannel {
             0.0
         };
 
-        bank_busy + row_affinity + heat_affinity + metrics_score + tunnel_score
+        bank_busy
+            + row_affinity
+            + heat_affinity
+            + metrics_score
+            + tunnel_score
             + self.pair_score_component()
+            + self.payload_size_bias * 0.05
+            + self.payload_entropy_bias * 0.03
+            + self.payload_structure_bias * 0.02
+            + self.payload_numeric_bias * 0.02
     }
 
     pub fn composite_channel_score_parallel_with_grid(
@@ -386,6 +437,9 @@ impl HbmChannel {
             + tunnel_score
             + self.pair_score_component()
             - grid_bias
+            + self.payload_size_bias * 0.05
+            + self.payload_entropy_bias * 0.03
+            + self.payload_structure_bias * 0.02
+            + self.payload_numeric_bias * 0.02
     }
 }
-

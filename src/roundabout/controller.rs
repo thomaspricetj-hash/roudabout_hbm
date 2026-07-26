@@ -163,6 +163,11 @@ impl HbmRoundaboutController {
             self.ccg.rotate_doors(layer);
         }
 
+        // BitDrop‑V2: update channel‑side payload biases for this request
+        for ch in &mut self.channels {
+            ch.update_bitdrop_biases(&req.payload, Some(&req.payload_profile));
+        }
+
         self.scratchpad
             .apply_bias_parallel(&mut req, &self.heatmap, &self.ccg, &self.channels);
 
@@ -338,8 +343,14 @@ impl HbmRoundaboutController {
                     route_score += lane_discipline_penalty(&fiber_req, &channels[ch]);
                     route_score += speed_limit_penalty(&channels[ch]);
 
-                    // NEW: grouped‑pair routing contribution
+                    // grouped‑pair routing contribution
                     route_score += channels[ch].pair_score_component();
+
+                    // BitDrop payload geometry contribution (channel‑side biases)
+                    route_score += channels[ch].payload_size_bias * 0.05;
+                    route_score += channels[ch].payload_entropy_bias * 0.03;
+                    route_score += channels[ch].payload_structure_bias * 0.02;
+                    route_score += channels[ch].payload_numeric_bias * 0.02;
 
                     // ----------------------------------------------------
 

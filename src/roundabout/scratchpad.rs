@@ -26,13 +26,23 @@ pub struct Scratchpad {
 
     pub success_reinforce: Vec<f32>,      // success reinforcement per layer
     pub failure_penalty: Vec<f32>,        // failure penalty per layer
+
+    // NEW: BitDrop temporal geometry memory
+    pub entropy_memory: Vec<f32>,         // entropy-driven temporal bias
+    pub size_memory: Vec<f32>,            // compressed-size temporal bias
+    pub structure_memory: Vec<f32>,       // structure-driven temporal bias
+    pub numeric_memory: Vec<f32>,         // numeric-counter locality memory
+    pub tunnel_memory: Vec<f32>,          // tunnel physics temporal bias
+
+    pub adaptive_memory: Vec<f32>,        // adaptive-weight temporal bias
+    pub stability_memory: Vec<f32>,       // stability-factor temporal penalty
 }
 
 impl Scratchpad {
     pub fn new(layers: usize) -> Self {
         Self {
             layers,
-            history: vec![vec![None; 8]; layers], // last 8 exits per layer
+            history: vec![vec![None; 8]; layers],
             failures: vec![0; layers],
 
             last_row: vec![None; layers],
@@ -44,6 +54,16 @@ impl Scratchpad {
 
             success_reinforce: vec![0.0; layers],
             failure_penalty: vec![0.0; layers],
+
+            // NEW: BitDrop temporal geometry memory
+            entropy_memory: vec![0.0; layers],
+            size_memory: vec![0.0; layers],
+            structure_memory: vec![0.0; layers],
+            numeric_memory: vec![0.0; layers],
+            tunnel_memory: vec![0.0; layers],
+
+            adaptive_memory: vec![0.0; layers],
+            stability_memory: vec![0.0; layers],
         }
     }
 
@@ -59,6 +79,16 @@ impl Scratchpad {
         if let Some(fp) = self.failure_penalty.get_mut(layer) {
             *fp *= 0.90;
         }
+
+        // NEW: BitDrop temporal reinforcement
+        self.entropy_memory[layer] *= 0.95;
+        self.size_memory[layer] *= 0.95;
+        self.structure_memory[layer] *= 0.95;
+        self.numeric_memory[layer] *= 0.95;
+        self.tunnel_memory[layer] *= 0.95;
+
+        self.adaptive_memory[layer] *= 0.97;
+        self.stability_memory[layer] *= 0.97;
     }
 
     /// Record a failure (circulation without exit).
@@ -69,36 +99,67 @@ impl Scratchpad {
         if let Some(fp) = self.failure_penalty.get_mut(layer) {
             *fp += 0.05;
         }
+
+        // NEW: BitDrop temporal penalty
+        self.entropy_memory[layer] += 0.02;
+        self.size_memory[layer] += 0.02;
+        self.structure_memory[layer] += 0.02;
+        self.numeric_memory[layer] += 0.02;
+        self.tunnel_memory[layer] += 0.02;
+
+        self.adaptive_memory[layer] += 0.03;
+        self.stability_memory[layer] += 0.03;
     }
 
     /// NEW: record locality info for HBM access
     pub fn record_locality(&mut self, layer: usize, row: u32, bank: u32, channel_id: usize) {
-        if let Some(r) = self.last_row.get_mut(layer) {
-            *r = Some(row);
-        }
-        if let Some(b) = self.last_bank.get_mut(layer) {
-            *b = Some(bank);
-        }
-        if let Some(c) = self.last_channel.get_mut(layer) {
-            *c = Some(channel_id);
-        }
+        self.last_row[layer] = Some(row);
+        self.last_bank[layer] = Some(bank);
+        self.last_channel[layer] = Some(channel_id);
+
+        // NEW: BitDrop locality temporal reinforcement
+        self.numeric_memory[layer] += 0.03;
     }
 
     /// NEW: record refresh storm
     pub fn record_refresh_event(&mut self, layer: usize) {
-        if let Some(r) = self.refresh_events.get_mut(layer) {
-            *r += 1;
-        }
+        self.refresh_events[layer] += 1;
+
+        // NEW: BitDrop stability penalty
+        self.stability_memory[layer] += 0.02;
     }
 
     /// NEW: record ECC correction
     pub fn record_ecc_event(&mut self, layer: usize) {
-        if let Some(e) = self.ecc_events.get_mut(layer) {
-            *e += 1;
-        }
+        self.ecc_events[layer] += 1;
+
+        // NEW: BitDrop stability penalty
+        self.stability_memory[layer] += 0.03;
     }
 
-    /// MAX‑tier parallel multilayer bias computation (heat + grid + index + failures + locality + events)
+    /// NEW: record BitDrop payload geometry
+    pub fn record_bitdrop(
+        &mut self,
+        layer: usize,
+        entropy: f32,
+        size: f32,
+        structure: f32,
+        numeric: f32,
+        tunnel: f32,
+        adaptive: f32,
+        stability: f32,
+    ) {
+        self.entropy_memory[layer] += entropy * 0.05;
+        self.size_memory[layer] += size * 0.05;
+        self.structure_memory[layer] += structure * 0.05;
+        self.numeric_memory[layer] += numeric * 0.05;
+        self.tunnel_memory[layer] += tunnel * 0.05;
+
+        self.adaptive_memory[layer] += adaptive * 0.04;
+        self.stability_memory[layer] += (1.0 - stability) * 0.04;
+    }
+
+    /// MAX‑tier parallel multilayer bias computation (HBM + BitDrop)
     pub fn apply_bias_parallel(
         &self,
         req: &mut HbmRequest,
@@ -106,13 +167,12 @@ impl Scratchpad {
         ccg: &CrossConnectGrid,
         channels: &[HbmChannel],
     ) {
-        // Compute all biases in parallel
         let biases: Vec<f32> = (0..self.layers)
             .into_par_iter()
             .map(|layer| {
                 // Failure bias
-                let fail_bias = self.failures[layer] as f32 * 0.05
-                    + self.failure_penalty[layer];
+                let fail_bias =
+                    self.failures[layer] as f32 * 0.05 + self.failure_penalty[layer];
 
                 // Success reinforcement
                 let success_bias = self.success_reinforce[layer] * 0.10;
@@ -134,30 +194,28 @@ impl Scratchpad {
                     }
                 }).unwrap_or(0.0);
 
-                // Heatmap bias (per-layer)
-                let heat_bias = if let Some(layer_vec) = heatmap.layers.get(layer) {
+                // Heatmap bias
+                let heat_bias = heatmap.layers.get(layer).map(|layer_vec| {
                     if !layer_vec.is_empty() {
-                        let avg_heat = layer_vec.iter().copied().sum::<f32>()
-                            / layer_vec.len() as f32;
+                        let avg_heat =
+                            layer_vec.iter().copied().sum::<f32>() / layer_vec.len() as f32;
                         avg_heat * 0.10
                     } else {
                         0.0
                     }
-                } else {
-                    0.0
-                };
+                }).unwrap_or(0.0);
 
-                // Grid bias (cluster + zone + door + geom)
+                // Grid bias
                 let grid_bias =
                     0.35 * ccg.cluster_bias[layer][req.channel_id] +
                     0.25 * ccg.zone_bias[layer][req.channel_id] +
                     0.20 * ccg.door_bias[layer][req.channel_id] +
                     0.20 * ccg.geom_bias[layer][req.channel_id];
 
-                // Rotating door bias
+                // Door rotation bias
                 let door_rot = ccg.door_rotation[layer][req.channel_id] as f32 * 0.01;
 
-                // NEW: locality bias (row/bank/channel)
+                // Locality bias
                 let locality_bias = {
                     let mut lb = 0.0;
                     if let Some(last_ch) = self.last_channel[layer] {
@@ -178,9 +236,19 @@ impl Scratchpad {
                     lb
                 };
 
-                // NEW: refresh/ECC penalties
+                // Refresh/ECC penalties
                 let refresh_penalty = self.refresh_events[layer] as f32 * 0.03;
                 let ecc_penalty = self.ecc_events[layer] as f32 * 0.04;
+
+                // NEW: BitDrop temporal geometry bias
+                let bitdrop_bias =
+                    self.entropy_memory[layer] * 0.06 +
+                    self.size_memory[layer] * 0.06 +
+                    self.structure_memory[layer] * 0.05 +
+                    self.numeric_memory[layer] * 0.05 +
+                    self.tunnel_memory[layer] * 0.05 +
+                    self.adaptive_memory[layer] * 0.04 +
+                    self.stability_memory[layer] * 0.04;
 
                 fail_bias
                     + success_bias
@@ -188,13 +256,13 @@ impl Scratchpad {
                     + heat_bias
                     + door_rot
                     + locality_bias
+                    + bitdrop_bias
                     - grid_bias
                     - refresh_penalty
                     - ecc_penalty
             })
             .collect();
 
-        // Apply biases sequentially (safe)
         for layer in 0..self.layers {
             req.update_layer_bias(layer, req.layer_bias[layer] + biases[layer]);
         }

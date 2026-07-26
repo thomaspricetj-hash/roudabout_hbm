@@ -30,6 +30,13 @@ pub struct CrossConnectGrid {
     // NEW: refresh/ECC geometry penalties
     pub refresh_penalty: Vec<Vec<f32>>,
     pub ecc_penalty: Vec<Vec<f32>>,
+
+    // NEW: BitDrop geometry layers
+    pub bitdrop_entropy_geom: Vec<Vec<f32>>,     // entropy → geometry coupling
+    pub bitdrop_size_geom: Vec<Vec<f32>>,        // compressed size → zone/cluster
+    pub bitdrop_structure_geom: Vec<Vec<f32>>,   // structured payload → door/geom
+    pub bitdrop_numeric_geom: Vec<Vec<f32>>,     // numeric-counter → locality
+    pub bitdrop_tunnel_geom: Vec<Vec<f32>>,      // tunnel physics → geometry
 }
 
 impl CrossConnectGrid {
@@ -62,27 +69,43 @@ impl CrossConnectGrid {
             // NEW: refresh/ECC penalties
             refresh_penalty: (0..layers).map(|_| zero_layer()).collect(),
             ecc_penalty: (0..layers).map(|_| zero_layer()).collect(),
+
+            // NEW: BitDrop geometry layers
+            bitdrop_entropy_geom: (0..layers).map(|_| zero_layer()).collect(),
+            bitdrop_size_geom: (0..layers).map(|_| zero_layer()).collect(),
+            bitdrop_structure_geom: (0..layers).map(|_| zero_layer()).collect(),
+            bitdrop_numeric_geom: (0..layers).map(|_| zero_layer()).collect(),
+            bitdrop_tunnel_geom: (0..layers).map(|_| zero_layer()).collect(),
         }
     }
 
     /// Reinforce a specific layer + id (successful channel selection).
-    /// Tuned for HBM locality.
+    /// Tuned for HBM locality + BitDrop geometry.
     pub fn reinforce(&mut self, layer: usize, id: usize) {
-        self.cluster_bias[layer][id] += 0.01;   // stack locality
-        self.zone_bias[layer][id] += 0.01;      // die locality
-        self.door_bias[layer][id] += 0.02;      // bank locality
-        self.geom_bias[layer][id] += 0.01;      // row/channel locality
+        // HBM locality
+        self.cluster_bias[layer][id] += 0.01;
+        self.zone_bias[layer][id] += 0.01;
+        self.door_bias[layer][id] += 0.02;
+        self.geom_bias[layer][id] += 0.01;
 
         self.row_locality[layer][id] += 0.03;
         self.bank_locality[layer][id] += 0.03;
         self.channel_locality[layer][id] += 0.02;
         self.die_locality[layer][id] += 0.01;
         self.stack_locality[layer][id] += 0.01;
+
+        // BitDrop geometry reinforcement
+        self.bitdrop_entropy_geom[layer][id] += 0.02;
+        self.bitdrop_size_geom[layer][id] += 0.02;
+        self.bitdrop_structure_geom[layer][id] += 0.02;
+        self.bitdrop_numeric_geom[layer][id] += 0.02;
+        self.bitdrop_tunnel_geom[layer][id] += 0.02;
     }
 
     /// Cool a specific layer + id (failed/avoided channel).
-    /// Tuned for HBM locality.
+    /// Tuned for HBM locality + BitDrop geometry.
     pub fn cool(&mut self, layer: usize, id: usize) {
+        // HBM locality cooling
         self.cluster_bias[layer][id] *= 0.98;
         self.zone_bias[layer][id] *= 0.98;
         self.door_bias[layer][id] *= 0.97;
@@ -96,9 +119,16 @@ impl CrossConnectGrid {
 
         self.refresh_penalty[layer][id] *= 0.90;
         self.ecc_penalty[layer][id] *= 0.90;
+
+        // BitDrop geometry cooling
+        self.bitdrop_entropy_geom[layer][id] *= 0.94;
+        self.bitdrop_size_geom[layer][id] *= 0.94;
+        self.bitdrop_structure_geom[layer][id] *= 0.94;
+        self.bitdrop_numeric_geom[layer][id] *= 0.94;
+        self.bitdrop_tunnel_geom[layer][id] *= 0.94;
     }
 
-    /// Rotate doors for a given layer (simple round‑robin door geometry).
+    /// Rotate doors for a given layer (BitDrop-aware)
     pub fn rotate_doors(&mut self, layer: usize) {
         let rot = &mut self.door_rotation[layer];
         if !rot.is_empty() {
@@ -152,8 +182,25 @@ impl CrossConnectGrid {
         self.ecc_penalty[layer][id] = ecc;
     }
 
-    /// Fused multilayer bias for an id (used by controller + metrics).
-    /// Now includes HBM locality + refresh/ECC penalties.
+    /// NEW: cache BitDrop geometry contributions
+    pub fn cache_bitdrop_geom(
+        &mut self,
+        layer: usize,
+        id: usize,
+        entropy: f32,
+        size: f32,
+        structure: f32,
+        numeric: f32,
+        tunnel: f32,
+    ) {
+        self.bitdrop_entropy_geom[layer][id] = entropy;
+        self.bitdrop_size_geom[layer][id] = size;
+        self.bitdrop_structure_geom[layer][id] = structure;
+        self.bitdrop_numeric_geom[layer][id] = numeric;
+        self.bitdrop_tunnel_geom[layer][id] = tunnel;
+    }
+
+    /// Fused multilayer bias for an id (HBM + BitDrop geometry)
     pub fn fused_bias(&self, id: usize) -> f32 {
         let mut acc = 0.0;
 
@@ -175,7 +222,14 @@ impl CrossConnectGrid {
                 -0.30 * self.refresh_penalty[layer][id] +
                 -0.25 * self.ecc_penalty[layer][id];
 
-            acc += w * (base + locality + penalties);
+            let bitdrop =
+                0.25 * self.bitdrop_entropy_geom[layer][id] +
+                0.25 * self.bitdrop_size_geom[layer][id] +
+                0.20 * self.bitdrop_structure_geom[layer][id] +
+                0.15 * self.bitdrop_numeric_geom[layer][id] +
+                0.15 * self.bitdrop_tunnel_geom[layer][id];
+
+            acc += w * (base + locality + penalties + bitdrop);
         }
 
         acc
