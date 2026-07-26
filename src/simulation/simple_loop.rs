@@ -92,6 +92,39 @@ fn rebalance_groups(channels: &mut [HbmChannel]) {
     let _ = len;
 }
 
+fn make_structured_payload<R: Rng>(rng: &mut R) -> (Vec<u8>, &'static str) {
+    let mode = rng.gen_range(0..3);
+
+    match mode {
+        // numeric‑counter style
+        0 => {
+            let mut buf = Vec::with_capacity(64);
+            for _ in 0..16 {
+                let v: u32 = rng.gen();
+                buf.extend_from_slice(&v.to_le_bytes());
+            }
+            (buf, "numbin")
+        }
+        // structured text/JSON‑ish
+        1 => {
+            let frame_id: u32 = rng.gen_range(0..1024);
+            let block_count: u8 = rng.gen_range(1..8);
+            let payload = format!(
+                "{{\"frame\":{},\"blocks\":{},\"flags\":[\"sim\",\"hbmr\"]}}",
+                frame_id, block_count
+            );
+            (payload.into_bytes(), "pymid")
+        }
+        // generic / mixed payload
+        _ => {
+            let len = rng.gen_range(128..512);
+            let mut buf = vec![0u8; len];
+            rng.fill(buf.as_mut_slice());
+            (buf, "adaptive")
+        }
+    }
+}
+
 pub fn run_stress_simulation() {
     let layer_count = 4;
     let mut rng = rand::thread_rng();
@@ -140,9 +173,9 @@ pub fn run_stress_simulation() {
         let bank_id = rng.gen_range(0..16);
         let row_addr: u64 = rng.gen_range(0..0xFFFF);
 
-        // ============================================================
-        // FIXED: HbmRequest::new now requires raw_payload + profile
-        // ============================================================
+        // structure‑aware payload for BitDrop‑V2 + routing
+        let (raw_payload, profile) = make_structured_payload(&mut rng);
+
         let mut req = HbmRequest::new(
             id as u64,
             start_channel,
@@ -151,13 +184,13 @@ pub fn run_stress_simulation() {
             priority,
             kind,
             layer_count,
-            vec![],     // <-- FIX: raw_payload
-            "sim",      // <-- FIX: profile
+            raw_payload,
+            profile,
         );
 
         let mut local_circulations = 0u32;
         for _ in 0..16 {
-            if let Some(ch) = ctrl.route_request(req.clone()) {
+            if let Some(_ch) = ctrl.route_request(req.clone()) {
                 exited += 1;
                 max_circulations = max_circulations.max(local_circulations);
 

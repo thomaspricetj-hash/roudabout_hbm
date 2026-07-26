@@ -52,6 +52,13 @@ pub struct HbmChannel {
     pub payload_size_bias: f32,
     pub payload_structure_bias: f32,
     pub payload_numeric_bias: f32,
+
+    // NEW: structure‑aware channel metrics
+    pub structured_lane_bias: f32,
+    pub structured_tunnel_bias: f32,
+    pub structured_geom_bias: f32,
+    pub structured_load_bias: f32,
+    pub structured_stability_bias: f32,
 }
 
 impl HbmChannel {
@@ -88,7 +95,66 @@ impl HbmChannel {
             payload_size_bias: 0.0,
             payload_structure_bias: 0.0,
             payload_numeric_bias: 0.0,
+
+            // NEW structure‑aware fields
+            structured_lane_bias: 0.0,
+            structured_tunnel_bias: 0.0,
+            structured_geom_bias: 0.0,
+            structured_load_bias: 0.0,
+            structured_stability_bias: 0.0,
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // NEW: Structure‑aware scoring
+    // -------------------------------------------------------------------------
+
+    pub fn update_structure_biases(&mut self, req: &super::request::HbmRequest) {
+        let is_structured = req.payload_is_structured;
+        let is_numeric = req.payload_is_numeric_counter;
+        let size = req.payload_compressed_size as f32;
+
+        // Lane bias: structured payloads prefer stable, low‑heat channels
+        self.structured_lane_bias =
+            if is_structured {
+                (self.metrics.stability_score * 0.10) - (self.metrics.load * 0.06)
+            } else {
+                0.0
+            };
+
+        // Numeric payloads prefer tunnels + low conflict
+        self.structured_tunnel_bias =
+            if is_numeric && self.is_tunnel {
+                (self.metrics.stability_score * 0.12)
+                    - (self.metrics.tunnel_congestion_level * 0.08)
+            } else {
+                0.0
+            };
+
+        // Geometry bias: structured payloads benefit from strong geom channels
+        self.structured_geom_bias =
+            if is_structured {
+                self.metrics.geometry_score * 0.08
+            } else {
+                0.0
+            };
+
+        // Load bias: small structured payloads prefer lightly loaded channels
+        let usage = self.metrics.load / self.max_load;
+        self.structured_load_bias =
+            if size < 256.0 {
+                (1.0 - usage) * 0.06
+            } else {
+                0.0
+            };
+
+        // Stability bias: structured payloads prefer stable channels
+        self.structured_stability_bias =
+            if is_structured {
+                self.metrics.stability_score * 0.10
+            } else {
+                0.0
+            };
     }
 
     // -------------------------------------------------------------------------
@@ -271,11 +337,14 @@ impl HbmChannel {
 
         let primary_bias = if self.is_pair_primary { -0.05 } else { 0.0 };
 
-        self.pair_affinity_score + self.pair_load_bias + primary_bias + self.tunnel_pair_component()
+        self.pair_affinity_score
+            + self.pair_load_bias
+            + primary_bias
+            + self.tunnel_pair_component()
     }
 
     // -------------------------------------------------------------------------
-    // ACCEPTANCE LOGIC
+    // ACCEPTANCE LOGIC (structure‑aware)
     // -------------------------------------------------------------------------
 
     pub fn can_accept(&self, bank_id: usize) -> bool {
@@ -290,6 +359,11 @@ impl HbmChannel {
         if self.is_tunnel {
             if self.metrics.tunnel_congestion_level >= 0.95 { return false; }
             if self.metrics.tunnel_loss_rate >= 0.10 { return false; }
+        }
+
+        // NEW: structure‑aware acceptance
+        if self.structured_load_bias < -0.10 {
+            return false;
         }
 
         true
@@ -307,7 +381,7 @@ impl HbmChannel {
     }
 
     // -------------------------------------------------------------------------
-    // PARALLEL SCORING
+    // PARALLEL SCORING (structure‑aware)
     // -------------------------------------------------------------------------
 
     pub fn bank_busy_score_parallel(&self) -> f32 {
@@ -388,6 +462,11 @@ impl HbmChannel {
             + self.payload_entropy_bias * 0.03
             + self.payload_structure_bias * 0.02
             + self.payload_numeric_bias * 0.02
+            + self.structured_lane_bias * 0.08
+            + self.structured_tunnel_bias * 0.09
+            + self.structured_geom_bias * 0.07
+            + self.structured_load_bias * 0.06
+            + self.structured_stability_bias * 0.08
     }
 
     pub fn composite_channel_score_parallel_with_grid(
@@ -441,5 +520,10 @@ impl HbmChannel {
             + self.payload_entropy_bias * 0.03
             + self.payload_structure_bias * 0.02
             + self.payload_numeric_bias * 0.02
+            + self.structured_lane_bias * 0.08
+            + self.structured_tunnel_bias * 0.09
+            + self.structured_geom_bias * 0.07
+            + self.structured_load_bias * 0.06
+            + self.structured_stability_bias * 0.08
     }
 }

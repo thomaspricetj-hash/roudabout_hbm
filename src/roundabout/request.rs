@@ -24,6 +24,106 @@ pub enum RequestKind {
     Prefetch,
 }
 
+// ---------- NEW: Structured payload support ----------
+
+const BLOCK_SIZE: usize = 128;
+
+#[derive(Debug, Clone)]
+struct StructuredBlock {
+    header: [u8; 16],
+    body: Vec<u8>,
+}
+
+#[derive(Debug, Clone)]
+struct StructuredFrame {
+    frame_id: u32,
+    total_blocks: u32,
+    blocks: Vec<StructuredBlock>,
+}
+
+fn build_block_header(
+    frame_id: u32,
+    block_index: u32,
+    total_blocks: u32,
+    body_len: u32,
+    flags: u32,
+) -> [u8; 16] {
+    let mut h = [0u8; 16];
+
+    // 0..4: frame_id
+    h[0..4].copy_from_slice(&frame_id.to_le_bytes());
+    // 4..8: block_index
+    h[4..8].copy_from_slice(&block_index.to_le_bytes());
+    // 8..12: total_blocks
+    h[8..12].copy_from_slice(&total_blocks.to_le_bytes());
+    // 12..16: body_len or flags hint
+    let combined = body_len ^ flags;
+    h[12..16].copy_from_slice(&combined.to_le_bytes());
+
+    h
+}
+
+fn structure_payload(raw: &[u8]) -> Vec<u8> {
+    if raw.is_empty() {
+        return Vec::new();
+    }
+
+    // Simple, deterministic frame_id based on length
+    let frame_id = (raw.len() as u32).wrapping_mul(0x9E37_79B9);
+
+    let total_blocks = ((raw.len() + BLOCK_SIZE - 1) / BLOCK_SIZE) as u32;
+    let mut blocks = Vec::with_capacity(total_blocks as usize);
+
+    for (i, chunk) in raw.chunks(BLOCK_SIZE).enumerate() {
+        let block_index = i as u32;
+        let body_len = chunk.len() as u32;
+
+        // Flags: very cheap hints for compressor
+        // bit 0: likely numeric
+        // bit 1: likely text/structured
+        let mut flags = 0u32;
+
+        let numeric_hint = looks_like_u32_counter(chunk);
+        let structured_hint = looks_like_text_or_structured(chunk);
+
+        if numeric_hint {
+            flags |= 0b0001;
+        }
+        if structured_hint {
+            flags |= 0b0010;
+        }
+
+        let header = build_block_header(frame_id, block_index, total_blocks, body_len, flags);
+        blocks.push(StructuredBlock {
+            header,
+            body: chunk.to_vec(),
+        });
+    }
+
+    let frame = StructuredFrame {
+        frame_id,
+        total_blocks,
+        blocks,
+    };
+
+    // Serialize frame into a single Vec<u8>:
+    // [FRAME_HEADER][BLOCK_HEADER+BODY]...
+    let mut out = Vec::with_capacity(raw.len() + (total_blocks as usize) * 32);
+
+    // Frame header: 8 bytes (frame_id + total_blocks)
+    out.extend_from_slice(&frame.frame_id.to_le_bytes());
+    out.extend_from_slice(&frame.total_blocks.to_le_bytes());
+
+    for b in frame.blocks {
+        out.extend_from_slice(&b.header);
+        out.extend_from_slice(&b.body);
+    }
+
+    out
+}
+
+// ---------- Existing HbmRequest ----------
+
 #[derive(Debug, Clone)]
 pub struct HbmRequest {
     pub id: u64,
@@ -89,10 +189,13 @@ impl HbmRequest {
     ) -> Self {
         let now = Instant::now();
 
-        // BitDrop profiling
-        let entropy = estimate_entropy(&raw_payload);
-        let is_structured = looks_like_text_or_structured(&raw_payload);
-        let is_numeric = looks_like_u32_counter(&raw_payload);
+        // ---------- NEW: Roundabout converts raw into structures ----------
+        let structured_payload = structure_payload(&raw_payload);
+
+        // BitDrop profiling on structured payload
+        let entropy = estimate_entropy(&structured_payload);
+        let is_structured = looks_like_text_or_structured(&structured_payload);
+        let is_numeric = looks_like_u32_counter(&structured_payload);
 
         // Choose effective profile
         let effective_profile = if profile.is_empty() {
@@ -109,7 +212,7 @@ impl HbmRequest {
             profile
         };
 
-        let compressed = compress_with_profile(&raw_payload, effective_profile);
+        let compressed = compress_with_profile(&structured_payload, effective_profile);
         let compressed_size = compressed.len();
 
         Self {

@@ -31,6 +31,88 @@ pub struct HbmRoundaboutController {
     pub scratchpad: Scratchpad,
 }
 
+// ---------- NEW: structure‑aware helpers ----------
+
+fn payload_structure_lane_bias(req: &HbmRequest, ch: &HbmChannel) -> f32 {
+    let mut bias = 0.0;
+
+    // Structured payloads prefer channels that are stable and low‑heat
+    if req.payload_is_structured {
+        let heat = ch.heat_affinity;
+        let stability = ch.metrics.stability_score;
+
+        bias += (stability * 0.08) - (heat * 0.05);
+    }
+
+    // Numeric counters prefer tunnels and low‑conflict banks
+    if req.payload_is_numeric_counter {
+        if ch.is_tunnel {
+            bias += 0.10;
+        }
+        if ch.metrics.row_conflicts < 2 {
+            bias += 0.06;
+        }
+    }
+
+    // Very small compressed payloads → favor lightly loaded channels
+    let size = req.payload_compressed_size as f32;
+    if size < 256.0 {
+        let usage = ch.metrics.load / ch.max_load;
+        bias += (1.0 - usage) * 0.05;
+    }
+
+    bias
+}
+
+fn payload_structure_tunnel_bias(req: &HbmRequest, ch: &HbmChannel) -> f32 {
+    if !ch.is_tunnel {
+        return 0.0;
+    }
+
+    let mut bias = 0.0;
+
+    // Structured payloads → tunnels with good geom + low heat
+    if req.payload_is_structured {
+        let geom = ch.metrics.geometry_score;
+        let heat = ch.heat_affinity;
+
+        bias += geom * 0.07;
+        bias -= heat * 0.04;
+    }
+
+    // Numeric counters → tunnels with high stability
+    if req.payload_is_numeric_counter {
+        let stability = ch.metrics.stability_score;
+        bias += stability * 0.09;
+    }
+
+    bias
+}
+
+fn payload_structure_locality_bias(req: &HbmRequest, scratchpad: &Scratchpad) -> f32 {
+    let mut bias = 0.0;
+
+    for layer in 0..scratchpad.layers {
+        if let Some(last_row) = scratchpad.last_row[layer] {
+            if last_row == req.row {
+                bias += 0.03;
+            }
+        }
+        if let Some(last_bank) = scratchpad.last_bank[layer] {
+            if last_bank == req.bank {
+                bias += 0.03;
+            }
+        }
+    }
+
+    // Structured payloads get a small boost when locality is strong
+    if req.payload_is_structured {
+        bias *= 1.3;
+    }
+
+    bias
+}
+
 fn compute_dynamic_fiber_count(
     heatmap: &Heatmap,
     scratchpad: &Scratchpad,
@@ -80,7 +162,7 @@ fn compute_dynamic_fiber_count(
     fibers.clamp(3, 12)
 }
 
-// ---------- RULES OF THE ROAD HELPERS (local, no extra structs) ----------
+// ---------- RULES OF THE ROAD HELPERS ----------
 
 fn no_u_turn_penalty(scratchpad: &Scratchpad, ch: usize, window: usize) -> f32 {
     for layer in 0..scratchpad.layers {
@@ -167,6 +249,10 @@ impl HbmRoundaboutController {
         for ch in &mut self.channels {
             ch.update_bitdrop_biases(&req.payload, Some(&req.payload_profile));
         }
+
+        // NEW: structure‑aware locality bias
+        let locality_bias = payload_structure_locality_bias(&req, &self.scratchpad);
+        req.update_locality_score(req.locality_score + locality_bias);
 
         self.scratchpad
             .apply_bias_parallel(&mut req, &self.heatmap, &self.ccg, &self.channels);
@@ -352,6 +438,10 @@ impl HbmRoundaboutController {
                     route_score += channels[ch].payload_structure_bias * 0.02;
                     route_score += channels[ch].payload_numeric_bias * 0.02;
 
+                    // NEW: structure‑aware lane + tunnel contribution
+                    route_score += payload_structure_lane_bias(&fiber_req, &channels[ch]) * 0.8;
+                    route_score += payload_structure_tunnel_bias(&fiber_req, &channels[ch]) * 0.9;
+
                     // ----------------------------------------------------
 
                     CascadeFiberResult {
@@ -395,7 +485,7 @@ impl HbmRoundaboutController {
 
             let valid_count = fiber_results.iter().filter(|f| f.ch_id.is_some()).count() as f32;
 
-            let avg_fused_heat = fiber_results
+            let _avg_fused_heat = fiber_results
                 .iter()
                 .filter(|f| f.ch_id.is_some())
                 .map(|f| f.fused_heat)
