@@ -1,0 +1,52 @@
+{
+  "benchmark_results": [
+    {
+      "bitdrop3d": {
+        "compressed_size": 1214,
+        "decode_ms": 0.8224,
+        "decode_throughput_mb_s": 1251.5270756376392,
+        "encode_ms": 10.2533,
+        "encode_throughput_mb_s": 100.38288814375807,
+        "name": "BitDrop3D",
+        "original_size": 1079253,
+        "ratio": 0.001124852096774343,
+        "roundtrip_ok": true,
+        "savings_percent": 99.88751479032257
+      },
+      "bitdrop3d_internal": {
+        "block_shape": [
+          4,
+          4,
+          64
+        ],
+        "max_layers": 8,
+        "version": "2 (BitDrop3D)"
+      },
+      "file": "sample.bin",
+      "lz4": {
+        "compressed_size": 6482,
+        "decode_ms": 0.1447,
+        "decode_throughput_mb_s": 7113.032944052485,
+        "encode_ms": 0.0384,
+        "encode_throughput_mb_s": 26803.53820323944,
+        "name": "lz4",
+        "original_size": 1079253,
+        "ratio": 0.006006006006006006,
+        "roundtrip_ok": true,
+        "savings_percent": 99.3993993993994
+      },
+      "zstd": {
+        "compressed_size": 1204,
+        "decode_ms": 0.7016,
+        "decode_throughput_mb_s": 1467.012353198966,
+        "encode_ms": 0.3883,
+        "encode_throughput_mb_s": 2650.671818193136,
+        "name": "zstd",
+        "original_size": 1079253,
+        "ratio": 0.0011155864287613747,
+        "roundtrip_ok": true,
+        "savings_percent": 99.88844135712385
+      }
+    }
+  ]
+}
