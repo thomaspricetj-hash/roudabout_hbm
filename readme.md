@@ -1,4 +1,4 @@
-⭐ HBM Roundabout Controller — MAX‑Tier Cognitive Routing Edition (v∞ Hyper‑Cascade)
+⭐ HBM Roundabout Controller — Cognitive Routing Edition (v∞ Hyper‑Cascade)
 
 Multilayer • Tunneling • Grouped Routing • Structor Cascade vmax • Structor Hyper‑Cascade v∞ • BitDrop‑V5 • Cognitive Scoring
 
