@@ -29,7 +29,9 @@ pub struct HbmRoundaboutController {
     pub arb: ArbitrationEngine,
     pub ccg: CrossConnectGrid,
     pub scratchpad: Scratchpad,
+    pub predictor: RepeatPredictor,
 }
+
 
 // ---------- structure‑aware helpers ----------
 
@@ -346,6 +348,94 @@ impl MicroScores {
             + self.collapse * w.w_collapse
             + self.entropy * w.w_entropy
             + self.load * w.w_load
+    }
+}
+// ---------- MAX‑Tier Repeat‑Memory Predictor (vmax) ----------
+
+#[derive(Clone, Debug)]
+struct RepeatPattern {
+    row: usize,
+    bank: usize,
+    priority: super::request::RequestPriority,
+    exit: usize,
+    confidence: f32,
+    last_seen: u64,
+    heat_signature: f32,
+}
+
+#[derive(Debug)]
+struct RepeatPredictor {
+    memory: Vec<RepeatPattern>,
+    max_memory: usize,
+}
+
+impl RepeatPredictor {
+    pub fn new() -> Self {
+        Self {
+            memory: Vec::new(),
+            max_memory: 512,
+        }
+    }
+
+    pub fn predict(&self, req: &HbmRequest) -> Option<usize> {
+        let mut best: Option<(usize, f32)> = None;
+
+        for pat in &self.memory {
+            if pat.row == req.row as usize && pat.bank == req.bank as usize {
+                let mut score = pat.confidence;
+
+                if pat.priority == req.priority {
+                    score += 0.20;
+                }
+
+                let heat_diff = (pat.heat_signature - req.heat_signature).abs();
+                score -= heat_diff * 0.10;
+
+                if let Some((_, best_score)) = best {
+                    if score > best_score {
+                        best = Some((pat.exit, score));
+                    }
+                } else {
+                    best = Some((pat.exit, score));
+                }
+            }
+        }
+
+        best.map(|(exit, _)| exit)
+    }
+
+    pub fn record(&mut self, req: &HbmRequest, exit: usize) {
+        let mut found = false;
+
+        for pat in &mut self.memory {
+            if pat.row == req.row as usize
+                && pat.bank == req.bank as usize
+                && pat.exit == exit
+            {
+                pat.confidence = (pat.confidence + 0.12).min(2.5);
+                pat.last_seen = req.id as u64;
+                pat.heat_signature = req.heat_signature;
+                found = true;
+                break;
+            }
+        }
+
+        if !found {
+            self.memory.push(RepeatPattern {
+                row: req.row as usize,
+                bank: req.bank as usize,
+                priority: req.priority,
+                exit,
+                confidence: 1.0,
+                last_seen: req.id as u64,
+                heat_signature: req.heat_signature,
+            });
+        }
+
+        if self.memory.len() > self.max_memory {
+            self.memory.sort_by(|a, b| a.last_seen.cmp(&b.last_seen));
+            self.memory.truncate(self.max_memory);
+        }
     }
 }
 
@@ -818,18 +908,28 @@ impl HbmRoundaboutController {
             layers,
             arb: ArbitrationEngine::new(),
             scratchpad: Scratchpad::new(layers),
+            predictor: RepeatPredictor::new(),
         }
     }
+
 
     pub fn route_request(&mut self, mut req: HbmRequest) -> Option<usize> {
         req.touch_attempt();
         self.heatmap.decay_step();
+
+        if let Some(predicted_exit) = self.predictor.predict(&req) {
+            if self.channels[predicted_exit].can_accept(req.bank as usize) {
+
+                return Some(predicted_exit);
+            }
+        }
 
         let max_layers = self
             .layers
             .min(self.heatmap.layers.len())
             .min(self.ccg.cluster_bias.len())
             .min(self.scratchpad.layers);
+
 
         for layer in 0..max_layers {
             self.heatmap.rotate_doors(layer);
@@ -924,9 +1024,14 @@ impl HbmRoundaboutController {
         if let Some(fiber) = best_fiber {
             let ch_id = fiber.ch_id.unwrap();
 
+            self.predictor.record(&req, ch_id);
+
             req.update_last_exit(Some(ch_id));
             req.update_route_score(fiber.route_score);
             req.update_heat_signature(fiber.fused_heat);
+            // ...rest of your reinforcement logic unchanged
+
+            
 
             let valid_count = fiber_results.iter().filter(|f| f.ch_id.is_some()).count() as f32;
 
