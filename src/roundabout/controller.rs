@@ -32,7 +32,6 @@ pub struct HbmRoundaboutController {
     pub predictor: RepeatPredictor,
 }
 
-
 // ---------- structure‑aware helpers ----------
 
 fn payload_structure_lane_bias(req: &HbmRequest, ch: &HbmChannel) -> f32 {
@@ -266,18 +265,44 @@ fn choose_compression_shape(
     }
 }
 
-// ---------- micro‑structors (vmax: 15 structors) ----------
+// ---------- micro‑structors (v∞ hyper‑cascade) ----------
 
 struct LocalityStructor;
+
+// Geom nested structors
+struct GeomClusterStructor;
+struct GeomZoneStructor;
+struct GeomDoorStructor;
+struct GeomGeomStructor;
 struct GeomStructor;
+
+// Tunnel nested structors remain simple
 struct TunnelStructor;
+
+// Thermal nested structors
+struct ThermalHeatStructor;
+struct ThermalGeomMixStructor;
 struct ThermalStructor;
+
+// Bank nested structors
+struct BankHistoryStructor;
+struct BankRefreshStructor;
+struct BankEccStructor;
 struct BankStructor;
 
 struct RoadRulesStructor<'a> {
     scratchpad: &'a Scratchpad,
     heatmap: &'a Heatmap,
 }
+
+// nested BitDrop sub‑structors
+struct BitDropPairStructor;
+struct BitDropSizeStructor;
+struct BitDropEntropyStructor;
+struct BitDropStructureStructor;
+struct BitDropNumericStructor;
+struct BitDropLaneStructor;
+struct BitDropTunnelStructor;
 
 struct BitDropStructor; // BitDrop‑V5
 
@@ -290,7 +315,10 @@ struct AdaptiveWeightsStructor<'a> {
     heatmap: &'a Heatmap,
 }
 
+struct TunnelGeomHeatStructor;
+struct TunnelGeomMixStructor;
 struct TunnelGeomStructor;
+
 struct HistoryStructor;
 struct TemporalStructor;
 struct CollapseStructor;
@@ -350,6 +378,7 @@ impl MicroScores {
             + self.load * w.w_load
     }
 }
+
 // ---------- MAX‑Tier Repeat‑Memory Predictor (vmax) ----------
 
 #[derive(Clone, Debug)]
@@ -554,9 +583,11 @@ impl LocalityStructor {
     }
 }
 
-impl GeomStructor {
+// Geom nested structors
+
+impl GeomClusterStructor {
     pub fn score(ctx: &CascadeContext, ch: usize) -> f32 {
-        let mut geom_score = 0.0;
+        let mut s = 0.0;
         let max_layers = ctx.layers.min(ctx.ccg.cluster_bias.len());
         for layer in 0..max_layers {
             let cluster = ctx
@@ -566,6 +597,17 @@ impl GeomStructor {
                 .and_then(|v| v.get(ch))
                 .copied()
                 .unwrap_or(0.0);
+            s += cluster;
+        }
+        s / max_layers.max(1) as f32
+    }
+}
+
+impl GeomZoneStructor {
+    pub fn score(ctx: &CascadeContext, ch: usize) -> f32 {
+        let mut s = 0.0;
+        let max_layers = ctx.layers.min(ctx.ccg.zone_bias.len());
+        for layer in 0..max_layers {
             let zone = ctx
                 .ccg
                 .zone_bias
@@ -573,6 +615,17 @@ impl GeomStructor {
                 .and_then(|v| v.get(ch))
                 .copied()
                 .unwrap_or(0.0);
+            s += zone;
+        }
+        s / max_layers.max(1) as f32
+    }
+}
+
+impl GeomDoorStructor {
+    pub fn score(ctx: &CascadeContext, ch: usize) -> f32 {
+        let mut s = 0.0;
+        let max_layers = ctx.layers.min(ctx.ccg.door_bias.len());
+        for layer in 0..max_layers {
             let door = ctx
                 .ccg
                 .door_bias
@@ -580,6 +633,17 @@ impl GeomStructor {
                 .and_then(|v| v.get(ch))
                 .copied()
                 .unwrap_or(0.0);
+            s += door;
+        }
+        s / max_layers.max(1) as f32
+    }
+}
+
+impl GeomGeomStructor {
+    pub fn score(ctx: &CascadeContext, ch: usize) -> f32 {
+        let mut s = 0.0;
+        let max_layers = ctx.layers.min(ctx.ccg.geom_bias.len());
+        for layer in 0..max_layers {
             let geom = ctx
                 .ccg
                 .geom_bias
@@ -587,13 +651,20 @@ impl GeomStructor {
                 .and_then(|v| v.get(ch))
                 .copied()
                 .unwrap_or(0.0);
-
-            geom_score += 0.25 * cluster
-                + 0.25 * zone
-                + 0.25 * door
-                + 0.25 * geom;
+            s += geom;
         }
-        geom_score / max_layers.max(1) as f32
+        s / max_layers.max(1) as f32
+    }
+}
+
+impl GeomStructor {
+    pub fn score(ctx: &CascadeContext, ch: usize) -> f32 {
+        let cluster = GeomClusterStructor::score(ctx, ch);
+        let zone = GeomZoneStructor::score(ctx, ch);
+        let door = GeomDoorStructor::score(ctx, ch);
+        let geom = GeomGeomStructor::score(ctx, ch);
+
+        0.25 * cluster + 0.25 * zone + 0.25 * door + 0.25 * geom
     }
 }
 
@@ -607,10 +678,12 @@ impl TunnelStructor {
     }
 }
 
-impl ThermalStructor {
+// Thermal nested structors
+
+impl ThermalHeatStructor {
     pub fn score(ctx: &CascadeContext, ch: usize) -> f32 {
-        let mut thermal_geom = 0.0;
-        let max_layers = ctx.layers.min(ctx.heatmap.layers.len()).min(ctx.ccg.cluster_bias.len());
+        let mut s = 0.0;
+        let max_layers = ctx.layers.min(ctx.heatmap.layers.len());
         for layer in 0..max_layers {
             let heat = ctx
                 .heatmap
@@ -619,6 +692,21 @@ impl ThermalStructor {
                 .and_then(|v| v.get(ch))
                 .copied()
                 .unwrap_or(0.0);
+            s += heat;
+        }
+        s / max_layers.max(1) as f32
+    }
+}
+
+impl ThermalGeomMixStructor {
+    pub fn score(ctx: &CascadeContext, ch: usize) -> f32 {
+        let mut s = 0.0;
+        let max_layers = ctx.layers
+            .min(ctx.ccg.cluster_bias.len())
+            .min(ctx.ccg.zone_bias.len())
+            .min(ctx.ccg.door_bias.len())
+            .min(ctx.ccg.geom_bias.len());
+        for layer in 0..max_layers {
             let cluster = ctx
                 .ccg
                 .cluster_bias
@@ -648,27 +736,66 @@ impl ThermalStructor {
                 .copied()
                 .unwrap_or(0.0);
 
-            thermal_geom +=
-                heat * (0.25 * cluster + 0.25 * zone + 0.25 * door + 0.25 * geom);
+            let mix = 0.25 * cluster + 0.25 * zone + 0.25 * door + 0.25 * geom;
+            s += mix;
         }
-        thermal_geom / max_layers.max(1) as f32
+        s / max_layers.max(1) as f32
+    }
+}
+
+impl ThermalStructor {
+    pub fn score(ctx: &CascadeContext, ch: usize) -> f32 {
+        let heat = ThermalHeatStructor::score(ctx, ch);
+        let geom_mix = ThermalGeomMixStructor::score(ctx, ch);
+        heat * geom_mix
+    }
+}
+
+// Bank nested structors
+
+impl BankHistoryStructor {
+    pub fn score(ctx: &CascadeContext, req: &HbmRequest) -> f32 {
+        let mut s = 0.0;
+        let max_sp_layers = ctx.scratchpad.layers;
+        for layer in 0..max_sp_layers {
+            if let Some(last_bank) = ctx.scratchpad.last_bank[layer] {
+                if last_bank == req.bank {
+                    s += 0.12;
+                }
+            }
+        }
+        s
+    }
+}
+
+impl BankRefreshStructor {
+    pub fn score(ctx: &CascadeContext) -> f32 {
+        let mut s = 0.0;
+        let max_sp_layers = ctx.scratchpad.layers;
+        for layer in 0..max_sp_layers {
+            s += ctx.scratchpad.refresh_events[layer] as f32 * 0.03;
+        }
+        s
+    }
+}
+
+impl BankEccStructor {
+    pub fn score(ctx: &CascadeContext) -> f32 {
+        let mut s = 0.0;
+        let max_sp_layers = ctx.scratchpad.layers;
+        for layer in 0..max_sp_layers {
+            s += ctx.scratchpad.ecc_events[layer] as f32 * 0.04;
+        }
+        s
     }
 }
 
 impl BankStructor {
     pub fn score(ctx: &CascadeContext, req: &HbmRequest) -> f32 {
-        let mut bank_conflict = 0.0;
-        let max_sp_layers = ctx.scratchpad.layers;
-        for layer in 0..max_sp_layers {
-            if let Some(last_bank) = ctx.scratchpad.last_bank[layer] {
-                if last_bank == req.bank {
-                    bank_conflict += 0.12;
-                }
-            }
-            bank_conflict += ctx.scratchpad.refresh_events[layer] as f32 * 0.03;
-            bank_conflict += ctx.scratchpad.ecc_events[layer] as f32 * 0.04;
-        }
-        bank_conflict
+        let h = BankHistoryStructor::score(ctx, req);
+        let r = BankRefreshStructor::score(ctx);
+        let e = BankEccStructor::score(ctx);
+        h + r + e
     }
 }
 
@@ -685,6 +812,50 @@ impl<'a> RoadRulesStructor<'a> {
     }
 }
 
+// nested BitDrop sub‑structors implementations
+
+impl BitDropPairStructor {
+    pub fn score(ch: &HbmChannel, shape_factor: f32) -> f32 {
+        ch.pair_score_component() * 1.2 * shape_factor
+    }
+}
+
+impl BitDropSizeStructor {
+    pub fn score(ch: &HbmChannel, shape_factor: f32) -> f32 {
+        ch.payload_size_bias * 0.07 * shape_factor
+    }
+}
+
+impl BitDropEntropyStructor {
+    pub fn score(ch: &HbmChannel, shape_factor: f32) -> f32 {
+        ch.payload_entropy_bias * 0.05 * shape_factor
+    }
+}
+
+impl BitDropStructureStructor {
+    pub fn score(ch: &HbmChannel, shape_factor: f32) -> f32 {
+        ch.payload_structure_bias * 0.04 * shape_factor
+    }
+}
+
+impl BitDropNumericStructor {
+    pub fn score(ch: &HbmChannel, shape_factor: f32) -> f32 {
+        ch.payload_numeric_bias * 0.04 * shape_factor
+    }
+}
+
+impl BitDropLaneStructor {
+    pub fn score(req: &HbmRequest, ch: &HbmChannel, shape_factor: f32) -> f32 {
+        payload_structure_lane_bias(req, ch) * 1.0 * shape_factor
+    }
+}
+
+impl BitDropTunnelStructor {
+    pub fn score(req: &HbmRequest, ch: &HbmChannel, shape_factor: f32) -> f32 {
+        payload_structure_tunnel_bias(req, ch) * 1.1 * shape_factor
+    }
+}
+
 // BitDrop‑V5: tuned for vmax cascade collapse patterns, now cube/pyramid‑aware
 impl BitDropStructor {
     pub fn score(
@@ -692,22 +863,20 @@ impl BitDropStructor {
         ch: &HbmChannel,
         shape: CompressionShape,
     ) -> f32 {
-        let mut s = 0.0;
-
         let shape_factor = match shape {
             CompressionShape::Cube => 1.0,
             CompressionShape::Pyramid => 1.15,
         };
 
-        s += ch.pair_score_component() * 1.2 * shape_factor;
-        s += ch.payload_size_bias * 0.07 * shape_factor;
-        s += ch.payload_entropy_bias * 0.05 * shape_factor;
-        s += ch.payload_structure_bias * 0.04 * shape_factor;
-        s += ch.payload_numeric_bias * 0.04 * shape_factor;
-        s += payload_structure_lane_bias(req, ch) * 1.0 * shape_factor;
-        s += payload_structure_tunnel_bias(req, ch) * 1.1 * shape_factor;
+        let s_pair = BitDropPairStructor::score(ch, shape_factor);
+        let s_size = BitDropSizeStructor::score(ch, shape_factor);
+        let s_entropy = BitDropEntropyStructor::score(ch, shape_factor);
+        let s_structure = BitDropStructureStructor::score(ch, shape_factor);
+        let s_numeric = BitDropNumericStructor::score(ch, shape_factor);
+        let s_lane = BitDropLaneStructor::score(req, ch, shape_factor);
+        let s_tunnel = BitDropTunnelStructor::score(req, ch, shape_factor);
 
-        s
+        s_pair + s_size + s_entropy + s_structure + s_numeric + s_lane + s_tunnel
     }
 }
 
@@ -727,14 +896,12 @@ impl<'a> PredictiveStructor<'a> {
     }
 }
 
-impl TunnelGeomStructor {
-    pub fn score(ctx: &CascadeContext, ch: usize) -> f32 {
-        if !ctx.channels[ch].is_tunnel {
-            return 0.0;
-        }
+// TunnelGeom nested structors
 
+impl TunnelGeomHeatStructor {
+    pub fn score(ctx: &CascadeContext, ch: usize) -> f32 {
         let mut s = 0.0;
-        let max_layers = ctx.layers.min(ctx.heatmap.layers.len()).min(ctx.ccg.cluster_bias.len());
+        let max_layers = ctx.layers.min(ctx.heatmap.layers.len());
         for layer in 0..max_layers {
             let heat = ctx
                 .heatmap
@@ -743,6 +910,21 @@ impl TunnelGeomStructor {
                 .and_then(|v| v.get(ch))
                 .copied()
                 .unwrap_or(0.0);
+            s += heat;
+        }
+        s / max_layers.max(1) as f32
+    }
+}
+
+impl TunnelGeomMixStructor {
+    pub fn score(ctx: &CascadeContext, ch: usize) -> f32 {
+        let mut s = 0.0;
+        let max_layers = ctx.layers
+            .min(ctx.ccg.cluster_bias.len())
+            .min(ctx.ccg.zone_bias.len())
+            .min(ctx.ccg.door_bias.len())
+            .min(ctx.ccg.geom_bias.len());
+        for layer in 0..max_layers {
             let cluster = ctx
                 .ccg
                 .cluster_bias
@@ -772,11 +954,23 @@ impl TunnelGeomStructor {
                 .copied()
                 .unwrap_or(0.0);
 
-            let geom_mix = 0.25 * cluster + 0.25 * zone + 0.25 * door + 0.25 * geom;
-            s += (1.0 - heat) * geom_mix;
+            let mix = 0.25 * cluster + 0.25 * zone + 0.25 * door + 0.25 * geom;
+            s += mix;
+        }
+        s / max_layers.max(1) as f32
+    }
+}
+
+impl TunnelGeomStructor {
+    pub fn score(ctx: &CascadeContext, ch: usize) -> f32 {
+        if !ctx.channels[ch].is_tunnel {
+            return 0.0;
         }
 
-        s / max_layers.max(1) as f32
+        let heat = TunnelGeomHeatStructor::score(ctx, ch);
+        let geom_mix = TunnelGeomMixStructor::score(ctx, ch);
+
+        (1.0 - heat) * geom_mix
     }
 }
 
@@ -912,14 +1106,12 @@ impl HbmRoundaboutController {
         }
     }
 
-
     pub fn route_request(&mut self, mut req: HbmRequest) -> Option<usize> {
         req.touch_attempt();
         self.heatmap.decay_step();
 
         if let Some(predicted_exit) = self.predictor.predict(&req) {
             if self.channels[predicted_exit].can_accept(req.bank as usize) {
-
                 return Some(predicted_exit);
             }
         }
@@ -929,7 +1121,6 @@ impl HbmRoundaboutController {
             .min(self.heatmap.layers.len())
             .min(self.ccg.cluster_bias.len())
             .min(self.scratchpad.layers);
-
 
         for layer in 0..max_layers {
             self.heatmap.rotate_doors(layer);
@@ -1029,9 +1220,6 @@ impl HbmRoundaboutController {
             req.update_last_exit(Some(ch_id));
             req.update_route_score(fiber.route_score);
             req.update_heat_signature(fiber.fused_heat);
-            // ...rest of your reinforcement logic unchanged
-
-            
 
             let valid_count = fiber_results.iter().filter(|f| f.ch_id.is_some()).count() as f32;
 
