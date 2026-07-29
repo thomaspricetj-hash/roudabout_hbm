@@ -110,7 +110,38 @@ fn structure_payload(raw: &[u8]) -> Vec<u8> {
     out
 }
 
-// ---------- Existing HbmRequest ----------
+// -----------------------------------------------------------------------------
+// NEW: Tesla‑style one‑way valve directional flow memory for requests
+// -----------------------------------------------------------------------------
+
+fn tesla_valve_analyze(payload: &[u8]) -> (f32, f32, f32) {
+    if payload.is_empty() {
+        return (0.0, 0.0, 0.0);
+    }
+
+    let mut forward = 0.0;
+    let mut reverse = 0.0;
+    let mut oscillation = 0.0;
+
+    let mut last_bit = payload[0] & 1;
+
+    for byte in payload {
+        for i in 0..8 {
+            let bit = (byte >> i) & 1;
+
+            if bit == last_bit {
+                forward += 0.02;
+            } else {
+                reverse += 0.04;
+                oscillation += 0.03;
+            }
+
+            last_bit = bit;
+        }
+    }
+
+    (forward, reverse, oscillation)
+}
 
 #[derive(Debug, Clone)]
 pub struct HbmRequest {
@@ -172,6 +203,11 @@ pub struct HbmRequest {
     pub delta_layer_bias: Vec<f32>,
     pub delta_layer_heat: Vec<f32>,
     pub delta_layer_scores: Vec<f32>,
+
+    // ---------- NEW: Tesla valve directional memory ----------
+    pub valve_forward: f32,
+    pub valve_reverse: f32,
+    pub valve_oscillation: f32,
 }
 
 impl HbmRequest {
@@ -210,6 +246,9 @@ impl HbmRequest {
 
         let compressed = compress_with_profile(&structured_payload, effective_profile);
         let compressed_size = compressed.len();
+
+        // Tesla valve directional analysis
+        let (vf, vr, vo) = tesla_valve_analyze(&compressed);
 
         Self {
             id,
@@ -253,7 +292,6 @@ impl HbmRequest {
             payload_is_numeric_counter: is_numeric,
             payload_compressed_size: compressed_size,
 
-            // NEW DF‑HBM delta fields initialized to zero
             delta_entropy: 0.0,
             delta_structure: 0.0,
             delta_numeric: 0.0,
@@ -266,7 +304,19 @@ impl HbmRequest {
             delta_layer_bias: vec![0.0; layers],
             delta_layer_heat: vec![0.0; layers],
             delta_layer_scores: vec![0.0; layers],
+
+            // Tesla valve directional memory
+            valve_forward: vf,
+            valve_reverse: vr,
+            valve_oscillation: vo,
         }
+    }
+
+    // ---------- NEW: Tesla valve scoring hook ----------
+    pub fn valve_bias(&self) -> f32 {
+        self.valve_forward * 0.10
+            - self.valve_reverse * 0.15
+            - self.valve_oscillation * 0.12
     }
 
     // ---------- NEW: Option‑C DF‑HBM delta‑frame update ----------
@@ -380,11 +430,14 @@ impl HbmRequest {
         let struct_bias = self.payload_structure_bias();
         let numeric_bias = self.payload_numeric_bias();
 
+        let valve_bias = self.valve_bias();
+
         self.route_score = score
             + size_bias * 0.05
             + entropy_bias * 0.03
             + struct_bias * 0.02
-            + numeric_bias * 0.02;
+            + numeric_bias * 0.02
+            + valve_bias;
     }
 
     pub fn update_last_exit(&mut self, channel: Option<usize>) {
@@ -460,3 +513,4 @@ impl HbmRequest {
         self.circulations = self.circulations.saturating_add(1);
     }
 }
+

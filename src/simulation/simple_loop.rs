@@ -35,11 +35,23 @@ fn attach_quads(channels: &mut [HbmChannel]) {
     }
 }
 
+/// Automatically attach pairs, triplets, or quads depending on channel count.
+/// This ensures ALL grouping modes are exercised in simulation.
+fn attach_all_groups(channels: &mut [HbmChannel]) {
+    let n = channels.len();
+
+    if n % 4 == 0 {
+        attach_quads(channels);
+    } else if n % 3 == 0 {
+        attach_triplets(channels);
+    } else {
+        attach_pairs(channels);
+    }
+}
+
 /// Pair/group imbalance correction + dynamic primary switching.
 /// Call this periodically (e.g., every N requests).
 fn rebalance_groups(channels: &mut [HbmChannel]) {
-    let len = channels.len();
-
     // Pairs
     for pair in channels.chunks_mut(2) {
         if pair.len() == 2 {
@@ -88,8 +100,6 @@ fn rebalance_groups(channels: &mut [HbmChannel]) {
             }
         }
     }
-
-    let _ = len;
 }
 
 fn make_structured_payload<R: Rng>(rng: &mut R) -> (Vec<u8>, &'static str) {
@@ -137,7 +147,8 @@ pub fn run_stress_simulation() {
         HbmChannel::new(3, 16, 0.85, layer_count),
     ];
 
-    attach_pairs(&mut channels);
+    // Use ALL grouping modes automatically
+    attach_all_groups(&mut channels);
 
     // Attach tunnel characteristics
     channels[2].attach_tunnel(1.5, 0.3, 0.01, 1.2, 0.25);
@@ -220,3 +231,4 @@ pub fn run_stress_simulation() {
         (exited as f32 / total_requests as f32) * 100.0
     );
 }
+

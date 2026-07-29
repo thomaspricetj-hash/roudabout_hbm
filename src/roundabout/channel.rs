@@ -53,12 +53,17 @@ pub struct HbmChannel {
     pub payload_structure_bias: f32,
     pub payload_numeric_bias: f32,
 
-    // NEW: structure‑aware channel metrics
+    // structure‑aware channel metrics
     pub structured_lane_bias: f32,
     pub structured_tunnel_bias: f32,
     pub structured_geom_bias: f32,
     pub structured_load_bias: f32,
     pub structured_stability_bias: f32,
+
+    // NEW: Tesla valve directional memory per‑channel
+    pub valve_forward: f32,
+    pub valve_reverse: f32,
+    pub valve_oscillation: f32,
 }
 
 impl HbmChannel {
@@ -96,12 +101,16 @@ impl HbmChannel {
             payload_structure_bias: 0.0,
             payload_numeric_bias: 0.0,
 
-            // NEW structure‑aware fields
             structured_lane_bias: 0.0,
             structured_tunnel_bias: 0.0,
             structured_geom_bias: 0.0,
             structured_load_bias: 0.0,
             structured_stability_bias: 0.0,
+
+            // Tesla valve directional memory
+            valve_forward: 0.0,
+            valve_reverse: 0.0,
+            valve_oscillation: 0.0,
         }
     }
 
@@ -114,7 +123,6 @@ impl HbmChannel {
         let is_numeric = req.payload_is_numeric_counter;
         let size = req.payload_compressed_size as f32;
 
-        // Lane bias: structured payloads prefer stable, low‑heat channels
         self.structured_lane_bias =
             if is_structured {
                 (self.metrics.stability_score * 0.10) - (self.metrics.load * 0.06)
@@ -122,7 +130,6 @@ impl HbmChannel {
                 0.0
             };
 
-        // Numeric payloads prefer tunnels + low conflict
         self.structured_tunnel_bias =
             if is_numeric && self.is_tunnel {
                 (self.metrics.stability_score * 0.12)
@@ -131,7 +138,6 @@ impl HbmChannel {
                 0.0
             };
 
-        // Geometry bias: structured payloads benefit from strong geom channels
         self.structured_geom_bias =
             if is_structured {
                 self.metrics.geometry_score * 0.08
@@ -139,7 +145,6 @@ impl HbmChannel {
                 0.0
             };
 
-        // Load bias: small structured payloads prefer lightly loaded channels
         let usage = self.metrics.load / self.max_load;
         self.structured_load_bias =
             if size < 256.0 {
@@ -148,13 +153,22 @@ impl HbmChannel {
                 0.0
             };
 
-        // Stability bias: structured payloads prefer stable channels
         self.structured_stability_bias =
             if is_structured {
                 self.metrics.stability_score * 0.10
             } else {
                 0.0
             };
+    }
+
+    // -------------------------------------------------------------------------
+    // NEW: Tesla valve coupling from request to channel
+    // -------------------------------------------------------------------------
+
+    pub fn update_valve_from_request(&mut self, req: &super::request::HbmRequest) {
+        self.valve_forward = req.valve_forward;
+        self.valve_reverse = req.valve_reverse;
+        self.valve_oscillation = req.valve_oscillation;
     }
 
     // -------------------------------------------------------------------------
@@ -361,7 +375,6 @@ impl HbmChannel {
             if self.metrics.tunnel_loss_rate >= 0.10 { return false; }
         }
 
-        // NEW: structure‑aware acceptance
         if self.structured_load_bias < -0.10 {
             return false;
         }
@@ -381,7 +394,7 @@ impl HbmChannel {
     }
 
     // -------------------------------------------------------------------------
-    // PARALLEL SCORING (structure‑aware)
+    // PARALLEL SCORING (structure‑aware + Tesla valve)
     // -------------------------------------------------------------------------
 
     pub fn bank_busy_score_parallel(&self) -> f32 {
@@ -452,6 +465,11 @@ impl HbmChannel {
             0.0
         };
 
+        let valve_component =
+            self.valve_forward * -0.10 +
+            self.valve_reverse * 0.12 +
+            self.valve_oscillation * 0.15;
+
         bank_busy
             + row_affinity
             + heat_affinity
@@ -467,6 +485,7 @@ impl HbmChannel {
             + self.structured_geom_bias * 0.07
             + self.structured_load_bias * 0.06
             + self.structured_stability_bias * 0.08
+            + valve_component
     }
 
     pub fn composite_channel_score_parallel_with_grid(
@@ -509,6 +528,11 @@ impl HbmChannel {
             0.0
         };
 
+        let valve_component =
+            self.valve_forward * -0.10 +
+            self.valve_reverse * 0.12 +
+            self.valve_oscillation * 0.15;
+
         bank_busy
             + row_affinity
             + heat_affinity
@@ -525,23 +549,22 @@ impl HbmChannel {
             + self.structured_geom_bias * 0.07
             + self.structured_load_bias * 0.06
             + self.structured_stability_bias * 0.08
+            + valve_component
     }
 
     // -------------------------------------------------------------------------
-    // HBM + BitDrop heat coupling (Option‑C)
+    // HBM + BitDrop heat coupling (Option‑C + Tesla valve)
     // -------------------------------------------------------------------------
 
     pub fn apply_hbm_bitdrop_heat(&self, heatmap: &mut Heatmap) {
         let ch = self.id;
 
-        // HBM locality / conflict sources
         heatmap.add_row_conflict(ch, self.metrics.row_conflicts as f32 * 0.02);
         heatmap.add_bank_busy(ch, self.metrics.bank_busy_events as f32 * 0.02);
         heatmap.add_channel_sat(ch, self.metrics.channel_saturation_events as f32 * 0.02);
         heatmap.add_refresh_heat(ch, self.metrics.refresh_events as f32 * 0.03);
         heatmap.add_ecc_heat(ch, self.metrics.ecc_events as f32 * 0.03);
 
-        // BitDrop payload‑shape heat
         let payload_heat =
             self.payload_size_bias * 0.04 +
             self.payload_entropy_bias * 0.04 +
@@ -550,7 +573,6 @@ impl HbmChannel {
 
         heatmap.add_bitdrop_payload_heat(ch, payload_heat);
 
-        // Tunnel physics heat
         let tunnel_heat = if self.is_tunnel {
             self.tunnel_bias * 0.05 + self.metrics.tunnel_congestion_level * 0.04
         } else {
@@ -558,11 +580,19 @@ impl HbmChannel {
         };
         heatmap.add_bitdrop_tunnel_heat(ch, tunnel_heat);
 
-        // Locality + numeric‑counter coupling heat
         let locality_heat =
             self.locality_score * 0.05 +
             self.metrics.locality_score * 0.05;
         heatmap.add_bitdrop_locality_heat(ch, locality_heat);
+
+        // Tesla valve directional heat coupling
+        let vf_heat = self.valve_forward * -0.05;
+        let vr_heat = self.valve_reverse * 0.06;
+        let vo_heat = self.valve_oscillation * 0.08;
+
+        heatmap.add_valve_forward(ch, vf_heat);
+        heatmap.add_valve_reverse(ch, vr_heat);
+        heatmap.add_valve_oscillation(ch, vo_heat);
     }
 
     pub fn sync_scratch_from_heatmap(&mut self, heatmap: &Heatmap) {

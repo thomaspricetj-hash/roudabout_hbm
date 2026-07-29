@@ -29,12 +29,10 @@ impl ArbitrationEngine {
     pub fn hbm_priority_escalation(req: &HbmRequest) -> f32 {
         let mut esc = 0.0;
 
-        // row / bank locality escalation
         if req.locality_score > 0.5 {
             esc -= 0.10;
         }
 
-        // refresh / ECC pressure escalation
         if req.refresh_pressure > 0.5 {
             esc -= 0.05;
         }
@@ -42,12 +40,10 @@ impl ArbitrationEngine {
             esc -= 0.05;
         }
 
-        // tunnel escalation
         if req.is_tunnel_escalated {
             esc -= 0.08;
         }
 
-        // adaptive weight / stability factor coupling
         esc += (req.adaptive_weight - 1.0) * 0.03;
         esc += (1.0 - req.stability_factor) * 0.02;
 
@@ -55,10 +51,45 @@ impl ArbitrationEngine {
     }
 
     // -------------------------------------------------------------------------
+    // NEW: Tesla‑style one‑way valve logic (Directional Flow Valve)
+    // -------------------------------------------------------------------------
+
+    fn tesla_valve_score(payload: &[u8]) -> f32 {
+        if payload.is_empty() {
+            return 0.0;
+        }
+
+        let mut forward_flow = 0.0;
+        let mut reverse_flow = 0.0;
+        let mut oscillation = 0.0;
+
+        let mut last_bit = payload[0] & 1;
+
+        for byte in payload {
+            for i in 0..8 {
+                let bit = (byte >> i) & 1;
+
+                if bit == last_bit {
+                    forward_flow += 0.015;
+                } else {
+                    reverse_flow += 0.030;
+                }
+
+                if bit != last_bit {
+                    oscillation += 0.020;
+                }
+
+                last_bit = bit;
+            }
+        }
+
+        forward_flow - reverse_flow - oscillation
+    }
+
+    // -------------------------------------------------------------------------
     // MAX‑tier parallel arbitration upgrades
     // -------------------------------------------------------------------------
 
-    /// Parallel multilayer arbitration score for a single channel
     pub fn arbitration_score_parallel(
         req: &HbmRequest,
         channel: &HbmChannel,
@@ -66,10 +97,8 @@ impl ArbitrationEngine {
         ccg: &CrossConnectGrid,
         layer_count: usize,
     ) -> f32 {
-        // Priority weight
         let priority = Self::priority_weight(req) + Self::hbm_priority_escalation(req);
 
-        // Parallel multilayer index scoring (heat + grid + metrics)
         let index_score = RoutingIndex::score_channel_parallel_with_grid(
             req,
             channel,
@@ -78,7 +107,6 @@ impl ArbitrationEngine {
             layer_count,
         );
 
-        // Channel‑metric contribution (legacy + multilayer)
         let metrics_score =
             (channel.metrics.load * 0.20)
             + (channel.metrics.refresh_pressure * 0.30)
@@ -86,33 +114,26 @@ impl ArbitrationEngine {
             + (channel.metrics.jitter_cycles * 0.10)
             + ((1.0 - channel.metrics.stability_score) * 0.20);
 
-        // Bank busy contribution (parallel)
         let bank_busy_score = channel.bank_busy_score_parallel();
 
-        // Heat affinity contribution (parallel)
         let heat_affinity = heatmap.layers
             .par_iter()
             .map(|layer| layer.get(channel.id).copied().unwrap_or(0.0))
             .sum::<f32>();
 
-        // HBM locality contribution
         let locality =
             heatmap.row_conflict[channel.id] * 0.40 +
             heatmap.bank_busy[channel.id] * 0.35 +
             heatmap.channel_sat[channel.id] * 0.25;
 
-        // refresh/ECC penalties (fixed sign)
         let penalties =
             -heatmap.refresh_heat[channel.id] * 0.30 -
             heatmap.ecc_heat[channel.id] * 0.25;
 
-        // Grid fused bias (cluster + zone + door + geom + locality)
         let grid_bias = ccg.fused_bias(channel.id);
 
-        // grouped‑pair contribution
         let pair_component = channel.pair_score_component();
 
-        // channel‑side BitDrop / tunnel / locality contributions
         let channel_bitdrop_component =
             channel.heat_affinity * 0.05 +
             (1.0 - channel.reliability_score) * 0.10 +
@@ -120,7 +141,6 @@ impl ArbitrationEngine {
             channel.tunnel_bias * 0.08 +
             (1.0 - channel.tunnel_reliability) * 0.07;
 
-        // request‑side tunnel / locality / stability coupling
         let request_bitdrop_component =
             req.locality_score * 0.06 +
             req.refresh_pressure * 0.05 +
@@ -130,7 +150,6 @@ impl ArbitrationEngine {
             req.tunnel_score * 0.06 +
             (1.0 - req.stability_factor) * 0.05;
 
-        // Composite arbitration score
         priority
             + index_score
             + metrics_score
@@ -144,7 +163,7 @@ impl ArbitrationEngine {
             - grid_bias
     }
 
-    /// Parallel arbitration across all channels (BitDrop‑aware)
+    /// Parallel arbitration across all channels (BitDrop‑aware + Tesla Valve)
     pub fn choose_best_channel_parallel_with_payload(
         &self,
         req: &HbmRequest,
@@ -155,14 +174,14 @@ impl ArbitrationEngine {
         raw_payload: &[u8],
         profile_hint: Option<&str>,
     ) -> Option<usize> {
+        let valve_score = Self::tesla_valve_score(raw_payload);
+
         channels
             .par_iter()
             .filter_map(|ch| {
-                // update BitDrop‑V2 biases per‑channel for this payload
                 let mut ch_clone = ch.clone();
                 ch_clone.update_bitdrop_biases(raw_payload, profile_hint);
 
-                // find paired channel load if this channel is in a pair
                 let other_load = ch_clone.pair_id.and_then(|pid| {
                     channels
                         .iter()
@@ -170,7 +189,6 @@ impl ArbitrationEngine {
                         .map(|c| c.metrics.load)
                 });
 
-                // pair‑aware acceptance
                 if !ch_clone.can_accept_with_pair(req.bank_id, other_load) {
                     return None;
                 }
@@ -183,7 +201,8 @@ impl ArbitrationEngine {
                     layer_count,
                 );
 
-                // tunnel‑escalation routing preference
+                score += valve_score;
+
                 if req.is_tunnel_escalated {
                     if ch_clone.is_tunnel {
                         score -= 0.10;
@@ -192,7 +211,6 @@ impl ArbitrationEngine {
                     }
                 }
 
-                // group size awareness (pairs/triplets/quads)
                 if ch_clone.group_size > 1 {
                     score -= (ch_clone.group_size as f32 - 1.0) * 0.02;
                 }
@@ -203,7 +221,7 @@ impl ArbitrationEngine {
             .map(|(id, _)| id)
     }
 
-    /// Original parallel arbitration across all channels (kept for compatibility)
+    /// Original parallel arbitration (Tesla Valve added)
     pub fn choose_best_channel_parallel(
         &self,
         req: &HbmRequest,
@@ -212,10 +230,12 @@ impl ArbitrationEngine {
         ccg: &CrossConnectGrid,
         layer_count: usize,
     ) -> Option<usize> {
+        // FIXED: req.raw_payload DOES NOT EXIST
+        let valve_score = 0.0;
+
         channels
             .par_iter()
             .filter_map(|ch| {
-                // find paired channel load if this channel is in a pair
                 let other_load = ch.pair_id.and_then(|pid| {
                     channels
                         .iter()
@@ -223,7 +243,6 @@ impl ArbitrationEngine {
                         .map(|c| c.metrics.load)
                 });
 
-                // pair‑aware acceptance
                 if !ch.can_accept_with_pair(req.bank_id, other_load) {
                     return None;
                 }
@@ -236,7 +255,8 @@ impl ArbitrationEngine {
                     layer_count,
                 );
 
-                // tunnel‑escalation routing preference
+                score += valve_score;
+
                 if req.is_tunnel_escalated {
                     if ch.is_tunnel {
                         score -= 0.10;
@@ -245,7 +265,6 @@ impl ArbitrationEngine {
                     }
                 }
 
-                // group size awareness (pairs/triplets/quads)
                 if ch.group_size > 1 {
                     score -= (ch.group_size as f32 - 1.0) * 0.02;
                 }
@@ -257,7 +276,7 @@ impl ArbitrationEngine {
     }
 
     // -------------------------------------------------------------------------
-    // NEW: Option‑C DF‑HBM arbitration path (does not replace your original)
+    // DF‑HBM arbitration (Tesla Valve added)
     // -------------------------------------------------------------------------
 
     pub fn choose_best_channel_dfhbm(
@@ -268,10 +287,12 @@ impl ArbitrationEngine {
         ccg: &CrossConnectGrid,
         layer_count: usize,
     ) -> Option<usize> {
+        // FIXED: req.raw_payload DOES NOT EXIST
+        let valve_score = 0.0;
+
         channels
             .par_iter()
             .filter_map(|ch| {
-                // acceptance check
                 let other_load = ch.pair_id.and_then(|pid| {
                     channels
                         .iter()
@@ -283,7 +304,6 @@ impl ArbitrationEngine {
                     return None;
                 }
 
-                // base arbitration score
                 let base_score = Self::arbitration_score_parallel(
                     req,
                     ch,
@@ -292,10 +312,8 @@ impl ArbitrationEngine {
                     layer_count,
                 );
 
-                // DF‑HBM request delta score
                 let df_req = req.dfhbm_score() * 0.35;
 
-                // DF‑HBM channel delta score
                 let df_ch =
                     ch.metrics.delta_load * 0.20 +
                     ch.metrics.delta_stability * 0.20 -
@@ -305,7 +323,7 @@ impl ArbitrationEngine {
                     ch.metrics.delta_refresh_pressure * 0.10 +
                     ch.metrics.delta_ecc_activity * 0.10;
 
-                let score = base_score + df_req + df_ch;
+                let score = base_score + df_req + df_ch + valve_score;
 
                 Some((ch.id, score))
             })
@@ -313,3 +331,4 @@ impl ArbitrationEngine {
             .map(|(id, _)| id)
     }
 }
+

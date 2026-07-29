@@ -62,6 +62,11 @@ pub struct ChannelMetrics {
     pub delta_channel_sat: f32,
     pub delta_refresh_pressure: f32,
     pub delta_ecc_activity: f32,
+
+    // ---------- NEW: Tesla valve directional metrics ----------
+    pub valve_forward_metric: f32,
+    pub valve_reverse_metric: f32,
+    pub valve_oscillation_metric: f32,
 }
 
 impl ChannelMetrics {
@@ -111,10 +116,27 @@ impl ChannelMetrics {
             delta_channel_sat: 0.0,
             delta_refresh_pressure: 0.0,
             delta_ecc_activity: 0.0,
+
+            // Tesla valve directional metrics
+            valve_forward_metric: 0.0,
+            valve_reverse_metric: 0.0,
+            valve_oscillation_metric: 0.0,
         }
     }
 
-    // ---------- Option‑C DF‑HBM delta integration ----------
+    // -------------------------------------------------------------------------
+    // NEW: Tesla valve directional update from channel
+    // -------------------------------------------------------------------------
+
+    pub fn update_valve_metrics(&mut self, channel: &HbmChannel) {
+        self.valve_forward_metric = channel.valve_forward * 0.10;
+        self.valve_reverse_metric = channel.valve_reverse * 0.12;
+        self.valve_oscillation_metric = channel.valve_oscillation * 0.15;
+    }
+
+    // -------------------------------------------------------------------------
+    // DF‑HBM delta integration
+    // -------------------------------------------------------------------------
 
     pub fn update_deltas_from_prev(&mut self, prev: &ChannelMetrics) {
         self.delta_load = self.load - prev.load;
@@ -146,10 +168,18 @@ impl ChannelMetrics {
             self.geometry_score * 0.30 +
             self.pair_imbalance * 0.15;
 
-        df_core + df_protection + locality_geom
+        // Tesla valve directional influence
+        let valve_component =
+            self.valve_forward_metric * -0.10 +
+            self.valve_reverse_metric * 0.12 +
+            self.valve_oscillation_metric * 0.15;
+
+        df_core + df_protection + locality_geom + valve_component
     }
 
-    // ---------- existing multilayer scoring ----------
+    // -------------------------------------------------------------------------
+    // Multilayer scoring (Tesla valve integrated)
+    // -------------------------------------------------------------------------
 
     pub fn multilayer_score_parallel(
         &self,
@@ -169,7 +199,6 @@ impl ChannelMetrics {
                     ((1.0 - self.layer_stability[layer]) * 0.20);
 
                 let req_bias = req.layer_bias.get(layer).copied().unwrap_or(0.0);
-
                 let heat = heatmap.layers[layer][channel.id];
 
                 let grid_bias =
@@ -179,7 +208,6 @@ impl ChannelMetrics {
                     0.20 * ccg.geom_bias[layer][channel.id];
 
                 let scratch = self.scratch[layer];
-
                 let door_rot = ccg.door_rotation[layer][channel.id] as f32 * 0.01;
 
                 let tunnel_score = if channel.is_tunnel {
@@ -204,7 +232,13 @@ impl ChannelMetrics {
 
                 let penalties =
                     -heatmap.refresh_heat[channel.id] * 0.30 -
-                    -heatmap.ecc_heat[channel.id] * 0.25;
+                    heatmap.ecc_heat[channel.id] * 0.25;
+
+                // Tesla valve directional influence
+                let valve_component =
+                    self.valve_forward_metric * -0.10 +
+                    self.valve_reverse_metric * 0.12 +
+                    self.valve_oscillation_metric * 0.15;
 
                 base
                     + req_bias
@@ -215,9 +249,14 @@ impl ChannelMetrics {
                     + tunnel_score
                     + locality
                     + penalties
+                    + valve_component
             })
             .sum()
     }
+
+    // -------------------------------------------------------------------------
+    // Stability update (Tesla valve integrated)
+    // -------------------------------------------------------------------------
 
     pub fn update_stability(&mut self, success: bool) {
         let delta = if success { 0.03 } else { -0.03 };
@@ -232,7 +271,21 @@ impl ChannelMetrics {
 
         let success_factor = if success { 0.05 } else { -0.05 };
         self.locality_score = (self.locality_score + success_factor).clamp(-1.0, 1.0);
+
+        // Tesla valve stability coupling
+        if success {
+            self.valve_forward_metric += 0.03;
+            self.valve_reverse_metric *= 0.90;
+            self.valve_oscillation_metric *= 0.90;
+        } else {
+            self.valve_reverse_metric += 0.04;
+            self.valve_oscillation_metric += 0.05;
+        }
     }
+
+    // -------------------------------------------------------------------------
+    // Remaining methods unchanged (refresh, ecc, jitter, throughput, etc.)
+    // -------------------------------------------------------------------------
 
     pub fn update_refresh(&mut self) {
         let now = Instant::now();
@@ -302,7 +355,6 @@ impl ChannelMetrics {
         self.geometry_score = fused.clamp(-2.0, 2.0);
     }
 
-    /// NEW: grouped‑pair metrics update
     pub fn update_pair_metrics(&mut self, success: bool, load_delta: f32) {
         if success {
             self.pair_successes = self.pair_successes.saturating_add(1);

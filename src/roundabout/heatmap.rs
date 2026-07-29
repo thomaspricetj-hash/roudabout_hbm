@@ -6,26 +6,26 @@ pub struct Heatmap {
     pub layers: Vec<Vec<f32>>,        // [layer][channel]
     pub decay: f32,
 
-    // multilayer scratchpad cache
     pub scratch: Vec<Vec<f32>>,       // [layer][channel]
-
-    // rotating doors per layer
     pub door_rotation: Vec<Vec<usize>>,
-
-    // per-layer weights for fused scoring
     pub layer_weights: Vec<f32>,
 
-    // NEW: HBM-specific multilayer metrics
-    pub row_conflict: Vec<f32>,       // row conflict heat
-    pub bank_busy: Vec<f32>,          // bank busy heat
-    pub channel_sat: Vec<f32>,        // channel saturation heat
-    pub refresh_heat: Vec<f32>,       // refresh cycle heat
-    pub ecc_heat: Vec<f32>,           // ECC correction heat
+    // HBM-specific multilayer metrics
+    pub row_conflict: Vec<f32>,
+    pub bank_busy: Vec<f32>,
+    pub channel_sat: Vec<f32>,
+    pub refresh_heat: Vec<f32>,
+    pub ecc_heat: Vec<f32>,
 
-    // NEW: BitDrop-aware multilayer metrics
-    pub bitdrop_payload_heat: Vec<f32>,   // payload size / entropy / structure heat
-    pub bitdrop_tunnel_heat: Vec<f32>,    // tunnel preference / tunnel physics heat
-    pub bitdrop_locality_heat: Vec<f32>,  // locality + numeric-counter coupling heat
+    // BitDrop-aware multilayer metrics
+    pub bitdrop_payload_heat: Vec<f32>,
+    pub bitdrop_tunnel_heat: Vec<f32>,
+    pub bitdrop_locality_heat: Vec<f32>,
+
+    // NEW: Tesla valve directional heat fields
+    pub valve_forward_heat: Vec<f32>,
+    pub valve_reverse_heat: Vec<f32>,
+    pub valve_oscillation_heat: Vec<f32>,
 }
 
 impl Heatmap {
@@ -40,40 +40,74 @@ impl Heatmap {
             layer_weights: vec![1.0; layer_count],
             decay,
 
-            // NEW: HBM multilayer heat sources
             row_conflict: vec![0.0; channel_count],
             bank_busy: vec![0.0; channel_count],
             channel_sat: vec![0.0; channel_count],
             refresh_heat: vec![0.0; channel_count],
             ecc_heat: vec![0.0; channel_count],
 
-            // NEW: BitDrop multilayer heat sources
             bitdrop_payload_heat: vec![0.0; channel_count],
             bitdrop_tunnel_heat: vec![0.0; channel_count],
             bitdrop_locality_heat: vec![0.0; channel_count],
+
+            // Tesla valve directional heat fields
+            valve_forward_heat: vec![0.0; channel_count],
+            valve_reverse_heat: vec![0.0; channel_count],
+            valve_oscillation_heat: vec![0.0; channel_count],
         }
     }
 
-    /// Parallel multilayer decay
+    // -------------------------------------------------------------------------
+    // NEW: Tesla valve heat injection
+    // -------------------------------------------------------------------------
+
+    pub fn add_valve_forward(&mut self, channel: usize, amount: f32) {
+        if let Some(v) = self.valve_forward_heat.get_mut(channel) {
+            *v += amount;
+        }
+    }
+
+    pub fn add_valve_reverse(&mut self, channel: usize, amount: f32) {
+        if let Some(v) = self.valve_reverse_heat.get_mut(channel) {
+            *v += amount;
+        }
+    }
+
+    pub fn add_valve_oscillation(&mut self, channel: usize, amount: f32) {
+        if let Some(v) = self.valve_oscillation_heat.get_mut(channel) {
+            *v += amount;
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Parallel multilayer decay (Tesla valve included)
+    // -------------------------------------------------------------------------
+
     pub fn decay_step(&mut self) {
         self.layers.par_iter_mut().for_each(|layer_vec| {
             layer_vec.iter_mut().for_each(|v| *v *= self.decay);
         });
 
-        // NEW: decay HBM-specific layers
         self.row_conflict.par_iter_mut().for_each(|v| *v *= self.decay);
         self.bank_busy.par_iter_mut().for_each(|v| *v *= self.decay);
         self.channel_sat.par_iter_mut().for_each(|v| *v *= self.decay);
         self.refresh_heat.par_iter_mut().for_each(|v| *v *= self.decay);
         self.ecc_heat.par_iter_mut().for_each(|v| *v *= self.decay);
 
-        // NEW: decay BitDrop-specific layers
         self.bitdrop_payload_heat.par_iter_mut().for_each(|v| *v *= self.decay);
         self.bitdrop_tunnel_heat.par_iter_mut().for_each(|v| *v *= self.decay);
         self.bitdrop_locality_heat.par_iter_mut().for_each(|v| *v *= self.decay);
+
+        // Tesla valve directional decay
+        self.valve_forward_heat.par_iter_mut().for_each(|v| *v *= self.decay);
+        self.valve_reverse_heat.par_iter_mut().for_each(|v| *v *= self.decay);
+        self.valve_oscillation_heat.par_iter_mut().for_each(|v| *v *= self.decay);
     }
 
-    /// Parallel heat injection across layers
+    // -------------------------------------------------------------------------
+    // Parallel heat injection
+    // -------------------------------------------------------------------------
+
     pub fn add_heat_parallel(&mut self, layer: usize, channel: usize, amount: f32) {
         if let Some(layer_vec) = self.layers.get_mut(layer) {
             if let Some(v) = layer_vec.get_mut(channel) {
@@ -82,63 +116,58 @@ impl Heatmap {
         }
     }
 
-    /// NEW: HBM row conflict heat injection
     pub fn add_row_conflict(&mut self, channel: usize, amount: f32) {
         if let Some(v) = self.row_conflict.get_mut(channel) {
             *v += amount;
         }
     }
 
-    /// NEW: HBM bank busy heat injection
     pub fn add_bank_busy(&mut self, channel: usize, amount: f32) {
         if let Some(v) = self.bank_busy.get_mut(channel) {
             *v += amount;
         }
     }
 
-    /// NEW: HBM channel saturation heat injection
     pub fn add_channel_sat(&mut self, channel: usize, amount: f32) {
         if let Some(v) = self.channel_sat.get_mut(channel) {
             *v += amount;
         }
     }
 
-    /// NEW: HBM refresh cycle heat injection
     pub fn add_refresh_heat(&mut self, channel: usize, amount: f32) {
         if let Some(v) = self.refresh_heat.get_mut(channel) {
             *v += amount;
         }
     }
 
-    /// NEW: HBM ECC correction heat injection
     pub fn add_ecc_heat(&mut self, channel: usize, amount: f32) {
         if let Some(v) = self.ecc_heat.get_mut(channel) {
             *v += amount;
         }
     }
 
-    /// NEW: BitDrop payload heat injection
     pub fn add_bitdrop_payload_heat(&mut self, channel: usize, amount: f32) {
         if let Some(v) = self.bitdrop_payload_heat.get_mut(channel) {
             *v += amount;
         }
     }
 
-    /// NEW: BitDrop tunnel heat injection
     pub fn add_bitdrop_tunnel_heat(&mut self, channel: usize, amount: f32) {
         if let Some(v) = self.bitdrop_tunnel_heat.get_mut(channel) {
             *v += amount;
         }
     }
 
-    /// NEW: BitDrop locality heat injection
     pub fn add_bitdrop_locality_heat(&mut self, channel: usize, amount: f32) {
         if let Some(v) = self.bitdrop_locality_heat.get_mut(channel) {
             *v += amount;
         }
     }
 
-    /// Parallel normalization: keeps heatmap stable under heavy load
+    // -------------------------------------------------------------------------
+    // Parallel normalization (Tesla valve included)
+    // -------------------------------------------------------------------------
+
     pub fn normalize(&mut self) {
         self.layers.par_iter_mut().for_each(|layer_vec| {
             let max_val = layer_vec.iter().copied().fold(0.0_f32, |acc, x| acc.max(x));
@@ -148,7 +177,6 @@ impl Heatmap {
             }
         });
 
-        // NEW: normalize HBM-specific layers
         let normalize_vec = |vec: &mut Vec<f32>| {
             let max_val = vec.iter().copied().fold(0.0_f32, |acc, x| acc.max(x));
             if max_val > 0.0 {
@@ -163,13 +191,20 @@ impl Heatmap {
         normalize_vec(&mut self.refresh_heat);
         normalize_vec(&mut self.ecc_heat);
 
-        // NEW: normalize BitDrop-specific layers
         normalize_vec(&mut self.bitdrop_payload_heat);
         normalize_vec(&mut self.bitdrop_tunnel_heat);
         normalize_vec(&mut self.bitdrop_locality_heat);
+
+        // Tesla valve directional normalization
+        normalize_vec(&mut self.valve_forward_heat);
+        normalize_vec(&mut self.valve_reverse_heat);
+        normalize_vec(&mut self.valve_oscillation_heat);
     }
 
-    /// Parallel reinforcement: boost channels that recently succeeded
+    // -------------------------------------------------------------------------
+    // Reinforcement / cooling
+    // -------------------------------------------------------------------------
+
     pub fn reinforce_parallel(&mut self, layer: usize, channel: usize) {
         if let Some(layer_vec) = self.layers.get_mut(layer) {
             if let Some(v) = layer_vec.get_mut(channel) {
@@ -178,7 +213,6 @@ impl Heatmap {
         }
     }
 
-    /// Parallel cooling: reduce heat on channels that failed
     pub fn cool_parallel(&mut self, layer: usize, channel: usize) {
         if let Some(layer_vec) = self.layers.get_mut(layer) {
             if let Some(v) = layer_vec.get_mut(channel) {
@@ -187,35 +221,30 @@ impl Heatmap {
         }
     }
 
-    /// NEW: refresh-aware cooling
     pub fn cool_refresh(&mut self, channel: usize) {
         if let Some(v) = self.refresh_heat.get_mut(channel) {
             *v *= 0.85;
         }
     }
 
-    /// NEW: ECC-aware cooling
     pub fn cool_ecc(&mut self, channel: usize) {
         if let Some(v) = self.ecc_heat.get_mut(channel) {
             *v *= 0.80;
         }
     }
 
-    /// Parallel full-layer heat injection (used for global events)
     pub fn inject_layer_heat(&mut self, layer: usize, amount: f32) {
         if let Some(layer_vec) = self.layers.get_mut(layer) {
             layer_vec.par_iter_mut().for_each(|v| *v += amount);
         }
     }
 
-    /// Parallel full-layer cooling (used for refresh events)
     pub fn cool_layer(&mut self, layer: usize, factor: f32) {
         if let Some(layer_vec) = self.layers.get_mut(layer) {
             layer_vec.par_iter_mut().for_each(|v| *v *= factor);
         }
     }
 
-    /// rotate doors for a given layer
     pub fn rotate_doors(&mut self, layer: usize) {
         if let Some(rot) = self.door_rotation.get_mut(layer) {
             if !rot.is_empty() {
@@ -224,7 +253,6 @@ impl Heatmap {
         }
     }
 
-    /// cache scratchpad values for fused scoring
     pub fn cache_scratch(&mut self, layer: usize, channel: usize, value: f32) {
         if let Some(layer_vec) = self.scratch.get_mut(layer) {
             if let Some(v) = layer_vec.get_mut(channel) {
@@ -233,31 +261,35 @@ impl Heatmap {
         }
     }
 
-    /// fused multilayer heat score (HBM + BitDrop-aware)
+    // -------------------------------------------------------------------------
+    // Fused heat scoring (Tesla valve included)
+    // -------------------------------------------------------------------------
+
     pub fn fused_heat(&self, channel: usize) -> f32 {
         let mut acc = 0.0;
 
-        // multilayer base heat
         for (layer, w) in self.layer_weights.iter().enumerate() {
             acc += w * self.layers[layer][channel];
         }
 
-        // NEW: HBM locality heat sources
         acc += self.row_conflict[channel] * 0.40;
         acc += self.bank_busy[channel] * 0.35;
         acc += self.channel_sat[channel] * 0.25;
         acc += self.refresh_heat[channel] * 0.20;
         acc += self.ecc_heat[channel] * 0.15;
 
-        // NEW: BitDrop payload / tunnel / locality heat sources
         acc += self.bitdrop_payload_heat[channel] * 0.25;
         acc += self.bitdrop_tunnel_heat[channel] * 0.20;
         acc += self.bitdrop_locality_heat[channel] * 0.20;
 
+        // Tesla valve directional heat
+        acc += self.valve_forward_heat[channel] * -0.20;   // forward flow reduces heat
+        acc += self.valve_reverse_heat[channel] * 0.25;    // reverse flow increases heat
+        acc += self.valve_oscillation_heat[channel] * 0.30; // oscillation increases heat sharply
+
         acc
     }
 
-    /// fused multilayer heat + grid bias (HBM geometry)
     pub fn fused_heat_with_grid(
         &self,
         channel: usize,
@@ -268,4 +300,5 @@ impl Heatmap {
         heat - bias
     }
 }
+
 

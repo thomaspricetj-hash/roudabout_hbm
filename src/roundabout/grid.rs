@@ -3,40 +3,38 @@ use std::fmt::Debug;
 #[derive(Debug, Clone)]
 pub struct CrossConnectGrid {
     // [layer][channel]
-    pub cluster_bias: Vec<Vec<f32>>,   // HBM stack-level bias
-    pub zone_bias: Vec<Vec<f32>>,      // die-level bias
-    pub door_bias: Vec<Vec<f32>>,      // bank-level bias
-    pub geom_bias: Vec<Vec<f32>>,      // row/channel locality bias
+    pub cluster_bias: Vec<Vec<f32>>,
+    pub zone_bias: Vec<Vec<f32>>,
+    pub door_bias: Vec<Vec<f32>>,
+    pub geom_bias: Vec<Vec<f32>>,
 
-    // rotating doors per layer [layer][channel]
     pub door_rotation: Vec<Vec<usize>>,
-
-    // multilayer index weights [layer]
     pub index_weights: Vec<f32>,
 
-    // multilayer scratchpad cache [layer][channel]
     pub scratch_cluster: Vec<Vec<f32>>,
     pub scratch_zone: Vec<Vec<f32>>,
     pub scratch_door: Vec<Vec<f32>>,
     pub scratch_geom: Vec<Vec<f32>>,
 
-    // NEW: HBM geometry layers
     pub row_locality: Vec<Vec<f32>>,
     pub bank_locality: Vec<Vec<f32>>,
     pub channel_locality: Vec<Vec<f32>>,
     pub die_locality: Vec<Vec<f32>>,
     pub stack_locality: Vec<Vec<f32>>,
 
-    // NEW: refresh/ECC geometry penalties
     pub refresh_penalty: Vec<Vec<f32>>,
     pub ecc_penalty: Vec<Vec<f32>>,
 
-    // NEW: BitDrop geometry layers
     pub bitdrop_entropy_geom: Vec<Vec<f32>>,
     pub bitdrop_size_geom: Vec<Vec<f32>>,
     pub bitdrop_structure_geom: Vec<Vec<f32>>,
     pub bitdrop_numeric_geom: Vec<Vec<f32>>,
     pub bitdrop_tunnel_geom: Vec<Vec<f32>>,
+
+    // ---------- NEW: Tesla valve directional geometry ----------
+    pub valve_forward_geom: Vec<Vec<f32>>,
+    pub valve_reverse_geom: Vec<Vec<f32>>,
+    pub valve_oscillation_geom: Vec<Vec<f32>>,
 
     // ---------- NEW: Option‑C DF‑HBM delta‑geometry ----------
     pub delta_cluster: Vec<Vec<f32>>,
@@ -58,6 +56,11 @@ pub struct CrossConnectGrid {
     pub delta_bitdrop_structure: Vec<Vec<f32>>,
     pub delta_bitdrop_numeric: Vec<Vec<f32>>,
     pub delta_bitdrop_tunnel: Vec<Vec<f32>>,
+
+    // ---------- NEW: Tesla valve delta geometry ----------
+    pub delta_valve_forward_geom: Vec<Vec<f32>>,
+    pub delta_valve_reverse_geom: Vec<Vec<f32>>,
+    pub delta_valve_oscillation_geom: Vec<Vec<f32>>,
 }
 
 impl CrossConnectGrid {
@@ -72,7 +75,6 @@ impl CrossConnectGrid {
             geom_bias: (0..layers).map(|_| zero_layer()).collect(),
 
             door_rotation: (0..layers).map(|_| zero_usize_layer()).collect(),
-
             index_weights: vec![1.0; layers],
 
             scratch_cluster: (0..layers).map(|_| zero_layer()).collect(),
@@ -95,6 +97,11 @@ impl CrossConnectGrid {
             bitdrop_numeric_geom: (0..layers).map(|_| zero_layer()).collect(),
             bitdrop_tunnel_geom: (0..layers).map(|_| zero_layer()).collect(),
 
+            // Tesla valve directional geometry
+            valve_forward_geom: (0..layers).map(|_| zero_layer()).collect(),
+            valve_reverse_geom: (0..layers).map(|_| zero_layer()).collect(),
+            valve_oscillation_geom: (0..layers).map(|_| zero_layer()).collect(),
+
             delta_cluster: (0..layers).map(|_| zero_layer()).collect(),
             delta_zone: (0..layers).map(|_| zero_layer()).collect(),
             delta_door: (0..layers).map(|_| zero_layer()).collect(),
@@ -114,13 +121,34 @@ impl CrossConnectGrid {
             delta_bitdrop_structure: (0..layers).map(|_| zero_layer()).collect(),
             delta_bitdrop_numeric: (0..layers).map(|_| zero_layer()).collect(),
             delta_bitdrop_tunnel: (0..layers).map(|_| zero_layer()).collect(),
+
+            delta_valve_forward_geom: (0..layers).map(|_| zero_layer()).collect(),
+            delta_valve_reverse_geom: (0..layers).map(|_| zero_layer()).collect(),
+            delta_valve_oscillation_geom: (0..layers).map(|_| zero_layer()).collect(),
         }
     }
 
-    /// Reinforce a specific layer + id (successful channel selection).
-    /// Tuned for HBM locality + BitDrop geometry.
+    // -------------------------------------------------------------------------
+    // Tesla valve reinforcement
+    // -------------------------------------------------------------------------
+
+    pub fn reinforce_valve(&mut self, layer: usize, id: usize, forward: f32, reverse: f32, oscillation: f32) {
+        self.valve_forward_geom[layer][id] += forward * 0.04;
+        self.valve_reverse_geom[layer][id] += reverse * 0.05;
+        self.valve_oscillation_geom[layer][id] += oscillation * 0.06;
+    }
+
+    pub fn cool_valve(&mut self, layer: usize, id: usize) {
+        self.valve_forward_geom[layer][id] *= 0.95;
+        self.valve_reverse_geom[layer][id] *= 0.92;
+        self.valve_oscillation_geom[layer][id] *= 0.90;
+    }
+
+    // -------------------------------------------------------------------------
+    // Reinforce (HBM + BitDrop + Tesla valve)
+    // -------------------------------------------------------------------------
+
     pub fn reinforce(&mut self, layer: usize, id: usize) {
-        // HBM locality
         self.cluster_bias[layer][id] += 0.01;
         self.zone_bias[layer][id] += 0.01;
         self.door_bias[layer][id] += 0.02;
@@ -132,18 +160,23 @@ impl CrossConnectGrid {
         self.die_locality[layer][id] += 0.01;
         self.stack_locality[layer][id] += 0.01;
 
-        // BitDrop geometry reinforcement
         self.bitdrop_entropy_geom[layer][id] += 0.02;
         self.bitdrop_size_geom[layer][id] += 0.02;
         self.bitdrop_structure_geom[layer][id] += 0.02;
         self.bitdrop_numeric_geom[layer][id] += 0.02;
         self.bitdrop_tunnel_geom[layer][id] += 0.02;
+
+        // Tesla valve reinforcement
+        self.valve_forward_geom[layer][id] += 0.03;
+        self.valve_reverse_geom[layer][id] *= 0.95;
+        self.valve_oscillation_geom[layer][id] *= 0.95;
     }
 
-    /// Cool a specific layer + id (failed/avoided channel).
-    /// Tuned for HBM locality + BitDrop geometry.
+    // -------------------------------------------------------------------------
+    // Cooling (HBM + BitDrop + Tesla valve)
+    // -------------------------------------------------------------------------
+
     pub fn cool(&mut self, layer: usize, id: usize) {
-        // HBM locality cooling
         self.cluster_bias[layer][id] *= 0.98;
         self.zone_bias[layer][id] *= 0.98;
         self.door_bias[layer][id] *= 0.97;
@@ -158,87 +191,22 @@ impl CrossConnectGrid {
         self.refresh_penalty[layer][id] *= 0.90;
         self.ecc_penalty[layer][id] *= 0.90;
 
-        // BitDrop geometry cooling
         self.bitdrop_entropy_geom[layer][id] *= 0.94;
         self.bitdrop_size_geom[layer][id] *= 0.94;
         self.bitdrop_structure_geom[layer][id] *= 0.94;
         self.bitdrop_numeric_geom[layer][id] *= 0.94;
         self.bitdrop_tunnel_geom[layer][id] *= 0.94;
+
+        // Tesla valve cooling
+        self.valve_forward_geom[layer][id] *= 0.95;
+        self.valve_reverse_geom[layer][id] *= 0.92;
+        self.valve_oscillation_geom[layer][id] *= 0.90;
     }
 
-    /// Rotate doors for a given layer (BitDrop-aware)
-    pub fn rotate_doors(&mut self, layer: usize) {
-        let rot = &mut self.door_rotation[layer];
-        if !rot.is_empty() {
-            rot.rotate_left(1);
-        }
-    }
+    // -------------------------------------------------------------------------
+    // Fused multilayer bias (HBM + BitDrop + Tesla valve)
+    // -------------------------------------------------------------------------
 
-    /// Cache multilayer scratchpad values for a given id.
-    pub fn cache_scratch(
-        &mut self,
-        layer: usize,
-        id: usize,
-        cluster: f32,
-        zone: f32,
-        door: f32,
-        geom: f32,
-    ) {
-        self.scratch_cluster[layer][id] = cluster;
-        self.scratch_zone[layer][id] = zone;
-        self.scratch_door[layer][id] = door;
-        self.scratch_geom[layer][id] = geom;
-    }
-
-    /// NEW: cache HBM geometry locality
-    pub fn cache_locality(
-        &mut self,
-        layer: usize,
-        id: usize,
-        row: f32,
-        bank: f32,
-        channel: f32,
-        die: f32,
-        stack: f32,
-    ) {
-        self.row_locality[layer][id] = row;
-        self.bank_locality[layer][id] = bank;
-        self.channel_locality[layer][id] = channel;
-        self.die_locality[layer][id] = die;
-        self.stack_locality[layer][id] = stack;
-    }
-
-    /// NEW: cache refresh/ECC penalties
-    pub fn cache_penalties(
-        &mut self,
-        layer: usize,
-        id: usize,
-        refresh: f32,
-        ecc: f32,
-    ) {
-        self.refresh_penalty[layer][id] = refresh;
-        self.ecc_penalty[layer][id] = ecc;
-    }
-
-    /// NEW: cache BitDrop geometry contributions
-    pub fn cache_bitdrop_geom(
-        &mut self,
-        layer: usize,
-        id: usize,
-        entropy: f32,
-        size: f32,
-        structure: f32,
-        numeric: f32,
-        tunnel: f32,
-    ) {
-        self.bitdrop_entropy_geom[layer][id] = entropy;
-        self.bitdrop_size_geom[layer][id] = size;
-        self.bitdrop_structure_geom[layer][id] = structure;
-        self.bitdrop_numeric_geom[layer][id] = numeric;
-        self.bitdrop_tunnel_geom[layer][id] = tunnel;
-    }
-
-    /// Fused multilayer bias for an id (HBM + BitDrop geometry)
     pub fn fused_bias(&self, id: usize) -> f32 {
         let mut acc = 0.0;
 
@@ -267,14 +235,19 @@ impl CrossConnectGrid {
                 0.15 * self.bitdrop_numeric_geom[layer][id] +
                 0.15 * self.bitdrop_tunnel_geom[layer][id];
 
-            acc += w * (base + locality + penalties + bitdrop);
+            let valve =
+                -0.20 * self.valve_forward_geom[layer][id] +
+                 0.25 * self.valve_reverse_geom[layer][id] +
+                 0.30 * self.valve_oscillation_geom[layer][id];
+
+            acc += w * (base + locality + penalties + bitdrop + valve);
         }
 
         acc
     }
 
     // -------------------------------------------------------------------------
-    // NEW: Option‑C DF‑HBM delta‑geometry update
+    // Delta update (HBM + BitDrop + Tesla valve)
     // -------------------------------------------------------------------------
 
     pub fn update_deltas_from_prev(&mut self, prev: &CrossConnectGrid) {
@@ -315,12 +288,20 @@ impl CrossConnectGrid {
                     self.bitdrop_numeric_geom[layer][id] - prev.bitdrop_numeric_geom[layer][id];
                 self.delta_bitdrop_tunnel[layer][id] =
                     self.bitdrop_tunnel_geom[layer][id] - prev.bitdrop_tunnel_geom[layer][id];
+
+                // Tesla valve delta geometry
+                self.delta_valve_forward_geom[layer][id] =
+                    self.valve_forward_geom[layer][id] - prev.valve_forward_geom[layer][id];
+                self.delta_valve_reverse_geom[layer][id] =
+                    self.valve_reverse_geom[layer][id] - prev.valve_reverse_geom[layer][id];
+                self.delta_valve_oscillation_geom[layer][id] =
+                    self.valve_oscillation_geom[layer][id] - prev.valve_oscillation_geom[layer][id];
             }
         }
     }
 
     // -------------------------------------------------------------------------
-    // NEW: Option‑C DF‑HBM fused delta‑geometry score
+    // Fused delta bias (HBM + BitDrop + Tesla valve)
     // -------------------------------------------------------------------------
 
     pub fn fused_delta_bias(&self, id: usize) -> f32 {
@@ -351,7 +332,12 @@ impl CrossConnectGrid {
                 0.15 * self.delta_bitdrop_numeric[layer][id] +
                 0.15 * self.delta_bitdrop_tunnel[layer][id];
 
-            acc += w * (delta_base + delta_locality + delta_penalties + delta_bitdrop);
+            let delta_valve =
+                -0.18 * self.delta_valve_forward_geom[layer][id] +
+                 0.22 * self.delta_valve_reverse_geom[layer][id] +
+                 0.28 * self.delta_valve_oscillation_geom[layer][id];
+
+            acc += w * (delta_base + delta_locality + delta_penalties + delta_bitdrop + delta_valve);
         }
 
         acc

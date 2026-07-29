@@ -32,6 +32,37 @@ pub struct HbmRoundaboutController {
     pub predictor: RepeatPredictor,
 }
 
+// ---------- CrossConnectGrid helpers for vmax controller ----------
+
+impl CrossConnectGrid {
+    /// Door rotation step for each layer (no-op if grid does not track rotation)
+    pub fn rotate_doors(&mut self, _layer: usize) {
+        // If door_rotation exists in CrossConnectGrid, you can implement:
+        // if let Some(rot) = self.door_rotation.get_mut(layer) {
+        //     if !rot.is_empty() {
+        //         rot.rotate_left(1);
+        //     }
+        // }
+    }
+
+    /// Cache scratch geometry for the chosen channel (no-op if scratch fields are not present)
+    pub fn cache_scratch(
+        &mut self,
+        _layer: usize,
+        _id: usize,
+        _cluster: f32,
+        _zone: f32,
+        _door: f32,
+        _geom: f32,
+    ) {
+        // If you have scratch_* fields in CrossConnectGrid, you can wire them here:
+        // self.scratch_cluster[layer][id] = cluster;
+        // self.scratch_zone[layer][id] = zone;
+        // self.scratch_door[layer][id] = door;
+        // self.scratch_geom[layer][id] = geom;
+    }
+}
+
 // ---------- structure‑aware helpers ----------
 
 fn payload_structure_lane_bias(req: &HbmRequest, ch: &HbmChannel) -> f32 {
@@ -328,6 +359,9 @@ struct LoadStructor;
 // NEW: Delta‑Frame Structor (DF‑HBM)
 struct DeltaStructor;
 
+// NEW: unified Tesla‑Valve structor (Option 3 hybrid)
+struct ValveStructor;
+
 struct MicroScores {
     pub locality: f32,
     pub geom: f32,
@@ -344,6 +378,7 @@ struct MicroScores {
     pub entropy: f32,
     pub load: f32,
     pub delta: f32,
+    pub valve: f32,
 }
 
 struct MicroWeights {
@@ -363,6 +398,7 @@ struct MicroWeights {
     pub w_load: f32,
     pub w_delta: f32,
     pub w_base: f32,
+    pub w_valve: f32,
 }
 
 impl MicroScores {
@@ -382,13 +418,14 @@ impl MicroScores {
             + self.entropy * w.w_entropy
             + self.load * w.w_load
             + self.delta * w.w_delta
+            + self.valve * w.w_valve
     }
 }
 
 // ---------- MAX‑Tier Repeat‑Memory Predictor (vmax) ----------
 
 #[derive(Clone, Debug)]
-struct RepeatPattern {
+pub struct RepeatPattern {
     row: usize,
     bank: usize,
     priority: super::request::RequestPriority,
@@ -399,7 +436,7 @@ struct RepeatPattern {
 }
 
 #[derive(Debug)]
-struct RepeatPredictor {
+pub struct RepeatPredictor {
     memory: Vec<RepeatPattern>,
     max_memory: usize,
 }
@@ -495,6 +532,7 @@ impl AdaptiveWeightsStructor<'_> {
             w_load: 0.50,
             w_delta: 0.60,
             w_base: 1.0,
+            w_valve: 0.40,
         };
 
         let mut failure_sum = 0.0;
@@ -527,7 +565,6 @@ impl AdaptiveWeightsStructor<'_> {
         let heat_factor = (avg_heat * 0.7).min(2.0);
         let temporal_factor = (req.circulations as f32 * 0.12).min(2.5);
 
-        // self‑evolving: lean harder on what historically fixes problems
         w.w_bank *= 1.0 + conflict_factor * 0.7;
         w.w_road *= 1.0 + failure_factor * 0.6;
         w.w_predictive *= 1.0 + failure_factor * 0.5;
@@ -537,9 +574,9 @@ impl AdaptiveWeightsStructor<'_> {
         w.w_entropy *= 1.0 + heat_factor * 0.4;
         w.w_load *= 1.0 + conflict_factor * 0.4;
 
-        // delta‑frame weighting — lean harder on change under chaos
         if avg_heat > 0.75 || failure_sum > 0.0 {
             w.w_delta *= 1.3;
+            w.w_valve *= 1.4;
         }
 
         if req.payload_is_structured {
@@ -548,6 +585,7 @@ impl AdaptiveWeightsStructor<'_> {
             w.w_tunnel_geom *= 1.4;
             w.w_collapse *= 1.4;
             w.w_entropy *= 1.3;
+            w.w_valve *= 1.2;
         }
 
         if req.payload_is_numeric_counter {
@@ -555,6 +593,7 @@ impl AdaptiveWeightsStructor<'_> {
             w.w_predictive *= 1.5;
             w.w_tunnel_geom *= 1.5;
             w.w_temporal *= 1.3;
+            w.w_valve *= 1.3;
         }
 
         if avg_heat > 0.85 {
@@ -562,6 +601,7 @@ impl AdaptiveWeightsStructor<'_> {
             w.w_bank *= 1.3;
             w.w_thermal *= 1.3;
             w.w_entropy *= 1.2;
+            w.w_valve *= 1.2;
         }
 
         w
@@ -1058,6 +1098,18 @@ impl DeltaStructor {
     }
 }
 
+// unified Tesla‑Valve structor
+impl ValveStructor {
+    pub fn score(_ctx: &CascadeContext, _req: &HbmRequest, ch: &HbmChannel) -> f32 {
+        // assumes HbmChannel has valve_forward / valve_reverse / valve_oscillation
+        let forward = ch.valve_forward;
+        let reverse = ch.valve_reverse;
+        let oscillation = ch.valve_oscillation;
+
+        forward * 0.10 - reverse * 0.12 - oscillation * 0.15
+    }
+}
+
 // ---------- fiber evaluation (vmax) ----------
 
 fn evaluate_fiber(
@@ -1097,6 +1149,7 @@ fn evaluate_fiber(
     let entropy = EntropyStructor::score(ctx, req, &ctx.channels[ch]);
     let load = LoadStructor::score(ctx, req, &ctx.channels[ch]);
     let delta = DeltaStructor::score(ctx, req, ch);
+    let valve = ValveStructor::score(ctx, req, &ctx.channels[ch]);
 
     let micro = MicroScores {
         locality,
@@ -1114,6 +1167,7 @@ fn evaluate_fiber(
         entropy,
         load,
         delta,
+        valve,
     };
 
     let weights = adaptive.weights(ctx, req);
