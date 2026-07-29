@@ -14,7 +14,7 @@ Inspired by traffic roundabouts, this controller eliminates stalls, reduces cont
 
 ⭐ Core Technologies (Cognitive Edition + v∞ Hyper‑Cascade)
 
-Structor Cascade vmax (15 micro‑structors)
+⭐ Structor Cascade vmax (15 micro‑structors)
 
 A multilayer scoring pipeline blending:
 
@@ -78,7 +78,7 @@ All structors run in parallel across fibers and layers.
 
 ⭐ Structor Hyper‑Cascade v∞ (Nested Structors Inside Structors)
 
-The vmax structors are now expanded into nested sub‑structors, forming a hyper‑cascade:
+The vmax structors are expanded into nested sub‑structors, forming a hyper‑cascade:
 
 
 
@@ -164,7 +164,11 @@ tunnel structor
 
 
 
-This increases cognitive scoring resolution by 18–35%, stability by 25–45%, and tunnel accuracy by 20–40%.
+Cognitive scoring resolution: +18–35%
+
+Stability: +25–45%
+
+Tunnel accuracy: +20–40%
 
 
 
@@ -208,9 +212,7 @@ Adds entropy‑aware, structure‑aware, numeric‑aware, collapse‑aware, and 
 
 
 
-Benefits:
-
-
+Benefits
 
 22–24× compression ratio
 
@@ -336,9 +338,7 @@ Predictor fast‑path selects exits before full cascade when confidence is high.
 
 
 
-Benefits:
-
-
+Benefits
 
 fewer circulations
 
@@ -754,9 +754,15 @@ src/
 
 &#x20;   simple\_loop.rs
 
-⭐ Intellectual Property Protection (Full Coverage + v∞ Hyper‑Cascade Edition)
+⭐ Intellectual Property Protection
 
-Copyright © 2024–2026 Thomas Price  
+Full Coverage + v∞ Hyper‑Cascade Edition
+
+
+
+Copyright © 2024–2026
+
+Thomas Price  
 
 All Rights Reserved.
 
@@ -772,7 +778,11 @@ Commercial licensing is available only through direct agreement with the author.
 
 
 
-Patent‑Ready Protection Clause
+⭐ Patent‑Ready Protection Clause
 
-This document, its algorithms, architectures, structors, nested structors, cascades, scoring systems, routing fabrics, compression geometries, and cognitive routing mechanisms constitute patent‑ready intellectual property. Any attempt to replicate, approximate, derive, or reverse‑engineer these systems — in whole or in part — without explicit written permission from Thomas Price is prohibited and enforceable under applicable intellectual property law.
+This document, its algorithms, architectures, structors, nested structors, cascades, scoring systems, routing fabrics, compression geometries, and cognitive routing mechanisms constitute patent‑ready intellectual property.
+
+
+
+Any attempt to replicate, approximate, derive, or reverse‑engineer these systems — in whole or in part — without explicit written permission from Thomas Price is prohibited and enforceable under applicable intellectual property law.
 

@@ -274,5 +274,37 @@ impl RoutingIndex {
             + bitdrop_req
             + bitdrop_ch
     }
+
+    // -------------------------------------------------------------------------
+    // NEW: Option‑C DF‑HBM delta‑index scoring
+    // -------------------------------------------------------------------------
+
+    pub fn dfhbm_index_score(
+        request: &HbmRequest,
+        channel: &HbmChannel,
+        ccg: &CrossConnectGrid,
+        heatmap: &Heatmap,
+    ) -> f32 {
+        let df_req = request.dfhbm_score() * 0.40;
+
+        let df_ch =
+            channel.metrics.delta_load * 0.25 +
+            channel.metrics.delta_stability * 0.25 -
+            channel.metrics.delta_row_conflict * 0.20 -
+            channel.metrics.delta_bank_busy * 0.20 -
+            channel.metrics.delta_channel_sat * 0.15 +
+            channel.metrics.delta_refresh_pressure * 0.15 +
+            channel.metrics.delta_ecc_activity * 0.15;
+
+        let df_geom = ccg.fused_delta_bias(channel.id) * 0.35;
+
+        let df_heat =
+            heatmap.row_conflict[channel.id] * 0.10 +
+            heatmap.bank_busy[channel.id] * 0.10 +
+            heatmap.channel_sat[channel.id] * 0.10;
+
+        df_req + df_ch + df_geom + df_heat
+    }
 }
+
 

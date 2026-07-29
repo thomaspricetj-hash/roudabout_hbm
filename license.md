@@ -1,6 +1,6 @@
 SyntheticMind MAX‑Tier Architecture \& Roundabout‑HBM Routing System
 
-Copyright © 2026 Thomas. All Rights Reserved.  
+Copyright © 2026 Thomas. All Rights Reserved.
 
 This license constitutes a binding legal agreement.
 
@@ -50,6 +50,10 @@ Viewing, accessing, storing, executing, or interacting with this work constitute
 
 
 
+(test only)
+
+
+
 No party may:
 
 
@@ -66,7 +70,7 @@ evaluate
 
 
 
-test
+
 
 
 

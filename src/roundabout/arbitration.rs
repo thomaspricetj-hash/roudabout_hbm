@@ -255,4 +255,61 @@ impl ArbitrationEngine {
             .min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(id, _)| id)
     }
+
+    // -------------------------------------------------------------------------
+    // NEW: Option‑C DF‑HBM arbitration path (does not replace your original)
+    // -------------------------------------------------------------------------
+
+    pub fn choose_best_channel_dfhbm(
+        &self,
+        req: &HbmRequest,
+        channels: &[HbmChannel],
+        heatmap: &Heatmap,
+        ccg: &CrossConnectGrid,
+        layer_count: usize,
+    ) -> Option<usize> {
+        channels
+            .par_iter()
+            .filter_map(|ch| {
+                // acceptance check
+                let other_load = ch.pair_id.and_then(|pid| {
+                    channels
+                        .iter()
+                        .find(|c| c.pair_id == Some(pid) && c.id != ch.id)
+                        .map(|c| c.metrics.load)
+                });
+
+                if !ch.can_accept_with_pair(req.bank_id, other_load) {
+                    return None;
+                }
+
+                // base arbitration score
+                let base_score = Self::arbitration_score_parallel(
+                    req,
+                    ch,
+                    heatmap,
+                    ccg,
+                    layer_count,
+                );
+
+                // DF‑HBM request delta score
+                let df_req = req.dfhbm_score() * 0.35;
+
+                // DF‑HBM channel delta score
+                let df_ch =
+                    ch.metrics.delta_load * 0.20 +
+                    ch.metrics.delta_stability * 0.20 -
+                    ch.metrics.delta_row_conflict * 0.15 -
+                    ch.metrics.delta_bank_busy * 0.15 -
+                    ch.metrics.delta_channel_sat * 0.10 +
+                    ch.metrics.delta_refresh_pressure * 0.10 +
+                    ch.metrics.delta_ecc_activity * 0.10;
+
+                let score = base_score + df_req + df_ch;
+
+                Some((ch.id, score))
+            })
+            .min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(id, _)| id)
+    }
 }

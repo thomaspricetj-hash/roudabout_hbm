@@ -21,22 +21,43 @@ pub struct CrossConnectGrid {
     pub scratch_geom: Vec<Vec<f32>>,
 
     // NEW: HBM geometry layers
-    pub row_locality: Vec<Vec<f32>>,       // row distance / conflict locality
-    pub bank_locality: Vec<Vec<f32>>,      // bank distance / busy locality
-    pub channel_locality: Vec<Vec<f32>>,   // channel distance / saturation locality
-    pub die_locality: Vec<Vec<f32>>,       // die distance (HBM stack)
-    pub stack_locality: Vec<Vec<f32>>,     // stack-level locality
+    pub row_locality: Vec<Vec<f32>>,
+    pub bank_locality: Vec<Vec<f32>>,
+    pub channel_locality: Vec<Vec<f32>>,
+    pub die_locality: Vec<Vec<f32>>,
+    pub stack_locality: Vec<Vec<f32>>,
 
     // NEW: refresh/ECC geometry penalties
     pub refresh_penalty: Vec<Vec<f32>>,
     pub ecc_penalty: Vec<Vec<f32>>,
 
     // NEW: BitDrop geometry layers
-    pub bitdrop_entropy_geom: Vec<Vec<f32>>,     // entropy → geometry coupling
-    pub bitdrop_size_geom: Vec<Vec<f32>>,        // compressed size → zone/cluster
-    pub bitdrop_structure_geom: Vec<Vec<f32>>,   // structured payload → door/geom
-    pub bitdrop_numeric_geom: Vec<Vec<f32>>,     // numeric-counter → locality
-    pub bitdrop_tunnel_geom: Vec<Vec<f32>>,      // tunnel physics → geometry
+    pub bitdrop_entropy_geom: Vec<Vec<f32>>,
+    pub bitdrop_size_geom: Vec<Vec<f32>>,
+    pub bitdrop_structure_geom: Vec<Vec<f32>>,
+    pub bitdrop_numeric_geom: Vec<Vec<f32>>,
+    pub bitdrop_tunnel_geom: Vec<Vec<f32>>,
+
+    // ---------- NEW: Option‑C DF‑HBM delta‑geometry ----------
+    pub delta_cluster: Vec<Vec<f32>>,
+    pub delta_zone: Vec<Vec<f32>>,
+    pub delta_door: Vec<Vec<f32>>,
+    pub delta_geom: Vec<Vec<f32>>,
+
+    pub delta_row_locality: Vec<Vec<f32>>,
+    pub delta_bank_locality: Vec<Vec<f32>>,
+    pub delta_channel_locality: Vec<Vec<f32>>,
+    pub delta_die_locality: Vec<Vec<f32>>,
+    pub delta_stack_locality: Vec<Vec<f32>>,
+
+    pub delta_refresh_penalty: Vec<Vec<f32>>,
+    pub delta_ecc_penalty: Vec<Vec<f32>>,
+
+    pub delta_bitdrop_entropy: Vec<Vec<f32>>,
+    pub delta_bitdrop_size: Vec<Vec<f32>>,
+    pub delta_bitdrop_structure: Vec<Vec<f32>>,
+    pub delta_bitdrop_numeric: Vec<Vec<f32>>,
+    pub delta_bitdrop_tunnel: Vec<Vec<f32>>,
 }
 
 impl CrossConnectGrid {
@@ -59,23 +80,40 @@ impl CrossConnectGrid {
             scratch_door: (0..layers).map(|_| zero_layer()).collect(),
             scratch_geom: (0..layers).map(|_| zero_layer()).collect(),
 
-            // NEW: HBM geometry layers
             row_locality: (0..layers).map(|_| zero_layer()).collect(),
             bank_locality: (0..layers).map(|_| zero_layer()).collect(),
             channel_locality: (0..layers).map(|_| zero_layer()).collect(),
             die_locality: (0..layers).map(|_| zero_layer()).collect(),
             stack_locality: (0..layers).map(|_| zero_layer()).collect(),
 
-            // NEW: refresh/ECC penalties
             refresh_penalty: (0..layers).map(|_| zero_layer()).collect(),
             ecc_penalty: (0..layers).map(|_| zero_layer()).collect(),
 
-            // NEW: BitDrop geometry layers
             bitdrop_entropy_geom: (0..layers).map(|_| zero_layer()).collect(),
             bitdrop_size_geom: (0..layers).map(|_| zero_layer()).collect(),
             bitdrop_structure_geom: (0..layers).map(|_| zero_layer()).collect(),
             bitdrop_numeric_geom: (0..layers).map(|_| zero_layer()).collect(),
             bitdrop_tunnel_geom: (0..layers).map(|_| zero_layer()).collect(),
+
+            delta_cluster: (0..layers).map(|_| zero_layer()).collect(),
+            delta_zone: (0..layers).map(|_| zero_layer()).collect(),
+            delta_door: (0..layers).map(|_| zero_layer()).collect(),
+            delta_geom: (0..layers).map(|_| zero_layer()).collect(),
+
+            delta_row_locality: (0..layers).map(|_| zero_layer()).collect(),
+            delta_bank_locality: (0..layers).map(|_| zero_layer()).collect(),
+            delta_channel_locality: (0..layers).map(|_| zero_layer()).collect(),
+            delta_die_locality: (0..layers).map(|_| zero_layer()).collect(),
+            delta_stack_locality: (0..layers).map(|_| zero_layer()).collect(),
+
+            delta_refresh_penalty: (0..layers).map(|_| zero_layer()).collect(),
+            delta_ecc_penalty: (0..layers).map(|_| zero_layer()).collect(),
+
+            delta_bitdrop_entropy: (0..layers).map(|_| zero_layer()).collect(),
+            delta_bitdrop_size: (0..layers).map(|_| zero_layer()).collect(),
+            delta_bitdrop_structure: (0..layers).map(|_| zero_layer()).collect(),
+            delta_bitdrop_numeric: (0..layers).map(|_| zero_layer()).collect(),
+            delta_bitdrop_tunnel: (0..layers).map(|_| zero_layer()).collect(),
         }
     }
 
@@ -230,6 +268,90 @@ impl CrossConnectGrid {
                 0.15 * self.bitdrop_tunnel_geom[layer][id];
 
             acc += w * (base + locality + penalties + bitdrop);
+        }
+
+        acc
+    }
+
+    // -------------------------------------------------------------------------
+    // NEW: Option‑C DF‑HBM delta‑geometry update
+    // -------------------------------------------------------------------------
+
+    pub fn update_deltas_from_prev(&mut self, prev: &CrossConnectGrid) {
+        for layer in 0..self.cluster_bias.len() {
+            for id in 0..self.cluster_bias[layer].len() {
+                self.delta_cluster[layer][id] =
+                    self.cluster_bias[layer][id] - prev.cluster_bias[layer][id];
+                self.delta_zone[layer][id] =
+                    self.zone_bias[layer][id] - prev.zone_bias[layer][id];
+                self.delta_door[layer][id] =
+                    self.door_bias[layer][id] - prev.door_bias[layer][id];
+                self.delta_geom[layer][id] =
+                    self.geom_bias[layer][id] - prev.geom_bias[layer][id];
+
+                self.delta_row_locality[layer][id] =
+                    self.row_locality[layer][id] - prev.row_locality[layer][id];
+                self.delta_bank_locality[layer][id] =
+                    self.bank_locality[layer][id] - prev.bank_locality[layer][id];
+                self.delta_channel_locality[layer][id] =
+                    self.channel_locality[layer][id] - prev.channel_locality[layer][id];
+                self.delta_die_locality[layer][id] =
+                    self.die_locality[layer][id] - prev.die_locality[layer][id];
+                self.delta_stack_locality[layer][id] =
+                    self.stack_locality[layer][id] - prev.stack_locality[layer][id];
+
+                self.delta_refresh_penalty[layer][id] =
+                    self.refresh_penalty[layer][id] - prev.refresh_penalty[layer][id];
+                self.delta_ecc_penalty[layer][id] =
+                    self.ecc_penalty[layer][id] - prev.ecc_penalty[layer][id];
+
+                self.delta_bitdrop_entropy[layer][id] =
+                    self.bitdrop_entropy_geom[layer][id] - prev.bitdrop_entropy_geom[layer][id];
+                self.delta_bitdrop_size[layer][id] =
+                    self.bitdrop_size_geom[layer][id] - prev.bitdrop_size_geom[layer][id];
+                self.delta_bitdrop_structure[layer][id] =
+                    self.bitdrop_structure_geom[layer][id] - prev.bitdrop_structure_geom[layer][id];
+                self.delta_bitdrop_numeric[layer][id] =
+                    self.bitdrop_numeric_geom[layer][id] - prev.bitdrop_numeric_geom[layer][id];
+                self.delta_bitdrop_tunnel[layer][id] =
+                    self.bitdrop_tunnel_geom[layer][id] - prev.bitdrop_tunnel_geom[layer][id];
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // NEW: Option‑C DF‑HBM fused delta‑geometry score
+    // -------------------------------------------------------------------------
+
+    pub fn fused_delta_bias(&self, id: usize) -> f32 {
+        let mut acc = 0.0;
+
+        for (layer, w) in self.index_weights.iter().enumerate() {
+            let delta_base =
+                0.30 * self.delta_cluster[layer][id] +
+                0.25 * self.delta_zone[layer][id] +
+                0.20 * self.delta_door[layer][id] +
+                0.20 * self.delta_geom[layer][id];
+
+            let delta_locality =
+                0.35 * self.delta_row_locality[layer][id] +
+                0.30 * self.delta_bank_locality[layer][id] +
+                0.25 * self.delta_channel_locality[layer][id] +
+                0.20 * self.delta_die_locality[layer][id] +
+                0.15 * self.delta_stack_locality[layer][id];
+
+            let delta_penalties =
+                -0.25 * self.delta_refresh_penalty[layer][id] +
+                -0.20 * self.delta_ecc_penalty[layer][id];
+
+            let delta_bitdrop =
+                0.25 * self.delta_bitdrop_entropy[layer][id] +
+                0.25 * self.delta_bitdrop_size[layer][id] +
+                0.20 * self.delta_bitdrop_structure[layer][id] +
+                0.15 * self.delta_bitdrop_numeric[layer][id] +
+                0.15 * self.delta_bitdrop_tunnel[layer][id];
+
+            acc += w * (delta_base + delta_locality + delta_penalties + delta_bitdrop);
         }
 
         acc

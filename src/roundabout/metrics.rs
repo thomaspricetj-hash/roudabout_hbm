@@ -53,6 +53,15 @@ pub struct ChannelMetrics {
     pub pair_successes: u32,
     pub pair_failures: u32,
     pub pair_imbalance: f32,
+
+    // ---------- Option‑C DF‑HBM delta frame metrics ----------
+    pub delta_load: f32,
+    pub delta_stability: f32,
+    pub delta_row_conflict: f32,
+    pub delta_bank_busy: f32,
+    pub delta_channel_sat: f32,
+    pub delta_refresh_pressure: f32,
+    pub delta_ecc_activity: f32,
 }
 
 impl ChannelMetrics {
@@ -94,8 +103,53 @@ impl ChannelMetrics {
             pair_successes: 0,
             pair_failures: 0,
             pair_imbalance: 0.0,
+
+            delta_load: 0.0,
+            delta_stability: 0.0,
+            delta_row_conflict: 0.0,
+            delta_bank_busy: 0.0,
+            delta_channel_sat: 0.0,
+            delta_refresh_pressure: 0.0,
+            delta_ecc_activity: 0.0,
         }
     }
+
+    // ---------- Option‑C DF‑HBM delta integration ----------
+
+    pub fn update_deltas_from_prev(&mut self, prev: &ChannelMetrics) {
+        self.delta_load = self.load - prev.load;
+        self.delta_stability = self.stability_score - prev.stability_score;
+        self.delta_row_conflict =
+            self.row_conflicts as f32 - prev.row_conflicts as f32;
+        self.delta_bank_busy =
+            self.bank_busy_events as f32 - prev.bank_busy_events as f32;
+        self.delta_channel_sat =
+            self.channel_saturation_events as f32 - prev.channel_saturation_events as f32;
+        self.delta_refresh_pressure = self.refresh_pressure - prev.refresh_pressure;
+        self.delta_ecc_activity = self.ecc_activity - prev.ecc_activity;
+    }
+
+    pub fn option_c_score(&self) -> f32 {
+        let df_core =
+            self.delta_load * 0.25 +
+            self.delta_stability * 0.30 -
+            self.delta_row_conflict * 0.20 -
+            self.delta_bank_busy * 0.20 -
+            self.delta_channel_sat * 0.15;
+
+        let df_protection =
+            self.delta_refresh_pressure * 0.20 +
+            self.delta_ecc_activity * 0.20;
+
+        let locality_geom =
+            self.locality_score * 0.30 +
+            self.geometry_score * 0.30 +
+            self.pair_imbalance * 0.15;
+
+        df_core + df_protection + locality_geom
+    }
+
+    // ---------- existing multilayer scoring ----------
 
     pub fn multilayer_score_parallel(
         &self,
@@ -150,7 +204,7 @@ impl ChannelMetrics {
 
                 let penalties =
                     -heatmap.refresh_heat[channel.id] * 0.30 -
-                    heatmap.ecc_heat[channel.id] * 0.25;
+                    -heatmap.ecc_heat[channel.id] * 0.25;
 
                 base
                     + req_bias

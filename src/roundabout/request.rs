@@ -158,6 +158,20 @@ pub struct HbmRequest {
     pub payload_is_structured: bool,
     pub payload_is_numeric_counter: bool,
     pub payload_compressed_size: usize,
+
+    // ---------- NEW: Option‑C DF‑HBM delta‑frame fields ----------
+    pub delta_entropy: f32,
+    pub delta_structure: f32,
+    pub delta_numeric: f32,
+    pub delta_size: f32,
+
+    pub delta_locality: f32,
+    pub delta_heat_signature: f32,
+    pub delta_circulations: f32,
+
+    pub delta_layer_bias: Vec<f32>,
+    pub delta_layer_heat: Vec<f32>,
+    pub delta_layer_scores: Vec<f32>,
 }
 
 impl HbmRequest {
@@ -238,8 +252,70 @@ impl HbmRequest {
             payload_is_structured: is_structured,
             payload_is_numeric_counter: is_numeric,
             payload_compressed_size: compressed_size,
+
+            // NEW DF‑HBM delta fields initialized to zero
+            delta_entropy: 0.0,
+            delta_structure: 0.0,
+            delta_numeric: 0.0,
+            delta_size: 0.0,
+
+            delta_locality: 0.0,
+            delta_heat_signature: 0.0,
+            delta_circulations: 0.0,
+
+            delta_layer_bias: vec![0.0; layers],
+            delta_layer_heat: vec![0.0; layers],
+            delta_layer_scores: vec![0.0; layers],
         }
     }
+
+    // ---------- NEW: Option‑C DF‑HBM delta‑frame update ----------
+
+    pub fn update_deltas_from_prev(&mut self, prev: &HbmRequest) {
+        self.delta_entropy = self.payload_entropy - prev.payload_entropy;
+        self.delta_structure =
+            (self.payload_is_structured as i32 - prev.payload_is_structured as i32) as f32;
+        self.delta_numeric =
+            (self.payload_is_numeric_counter as i32 - prev.payload_is_numeric_counter as i32)
+                as f32;
+        self.delta_size =
+            self.payload_compressed_size as f32 - prev.payload_compressed_size as f32;
+
+        self.delta_locality = self.locality_score - prev.locality_score;
+        self.delta_heat_signature = self.heat_signature - prev.heat_signature;
+        self.delta_circulations = self.circulations as f32 - prev.circulations as f32;
+
+        for i in 0..self.layer_bias.len() {
+            self.delta_layer_bias[i] = self.layer_bias[i] - prev.layer_bias[i];
+            self.delta_layer_heat[i] = self.layer_heat[i] - prev.layer_heat[i];
+            self.delta_layer_scores[i] = self.layer_scores[i] - prev.layer_scores[i];
+        }
+    }
+
+    pub fn dfhbm_score(&self) -> f32 {
+        let payload_delta =
+            self.delta_entropy * 0.25 +
+            self.delta_structure * 0.20 +
+            self.delta_numeric * 0.20 +
+            self.delta_size * 0.10;
+
+        let locality_delta =
+            self.delta_locality * 0.30 +
+            self.delta_heat_signature * 0.25 +
+            self.delta_circulations * 0.20;
+
+        let layer_delta: f32 = self
+            .delta_layer_bias
+            .iter()
+            .zip(self.delta_layer_heat.iter())
+            .zip(self.delta_layer_scores.iter())
+            .map(|((b, h), s)| b * 0.10 + h * 0.10 + s * 0.10)
+            .sum();
+
+        payload_delta + locality_delta + layer_delta
+    }
+
+    // ---------- existing methods unchanged ----------
 
     pub fn escalate(&mut self) {
         self.priority = match self.priority {

@@ -526,4 +526,54 @@ impl HbmChannel {
             + self.structured_load_bias * 0.06
             + self.structured_stability_bias * 0.08
     }
+
+    // -------------------------------------------------------------------------
+    // HBM + BitDrop heat coupling (Option‑C)
+    // -------------------------------------------------------------------------
+
+    pub fn apply_hbm_bitdrop_heat(&self, heatmap: &mut Heatmap) {
+        let ch = self.id;
+
+        // HBM locality / conflict sources
+        heatmap.add_row_conflict(ch, self.metrics.row_conflicts as f32 * 0.02);
+        heatmap.add_bank_busy(ch, self.metrics.bank_busy_events as f32 * 0.02);
+        heatmap.add_channel_sat(ch, self.metrics.channel_saturation_events as f32 * 0.02);
+        heatmap.add_refresh_heat(ch, self.metrics.refresh_events as f32 * 0.03);
+        heatmap.add_ecc_heat(ch, self.metrics.ecc_events as f32 * 0.03);
+
+        // BitDrop payload‑shape heat
+        let payload_heat =
+            self.payload_size_bias * 0.04 +
+            self.payload_entropy_bias * 0.04 +
+            self.payload_structure_bias * 0.03 +
+            self.payload_numeric_bias * 0.03;
+
+        heatmap.add_bitdrop_payload_heat(ch, payload_heat);
+
+        // Tunnel physics heat
+        let tunnel_heat = if self.is_tunnel {
+            self.tunnel_bias * 0.05 + self.metrics.tunnel_congestion_level * 0.04
+        } else {
+            0.0
+        };
+        heatmap.add_bitdrop_tunnel_heat(ch, tunnel_heat);
+
+        // Locality + numeric‑counter coupling heat
+        let locality_heat =
+            self.locality_score * 0.05 +
+            self.metrics.locality_score * 0.05;
+        heatmap.add_bitdrop_locality_heat(ch, locality_heat);
+    }
+
+    pub fn sync_scratch_from_heatmap(&mut self, heatmap: &Heatmap) {
+        let layer_count = self.metrics.scratch.len().min(heatmap.scratch.len());
+        for layer in 0..layer_count {
+            if let Some(layer_vec) = heatmap.scratch.get(layer) {
+                if let Some(v) = layer_vec.get(self.id) {
+                    self.metrics.scratch[layer] = *v;
+                }
+            }
+        }
+    }
 }
+

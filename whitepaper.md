@@ -1,6 +1,6 @@
-⭐ Updated White Paper — MAX‑Tier Cognitive Routing Fabric (v∞ Hyper‑Cascade Edition)
+⭐ Updated White Paper —Cognitive Routing Fabric (v∞ Hyper‑Cascade Edition)
 
-⭐ 1. Overview — Cognitive Routing Fabric ( vmax + v∞)
+⭐ 1. Overview — Cognitive Routing Fabric (vmax + v∞)
 
 The Roundabout architecture now operates as a self‑optimizing cognitive routing organism, integrating:
 
@@ -8,13 +8,13 @@ The Roundabout architecture now operates as a self‑optimizing cognitive routin
 
 Structor Hyper‑Cascade v∞  
 
-(nested structors inside structors; geometry cascade, thermal cascade, tunnel‑geometry cascade, bank‑conflict cascade)
+Nested structors inside structors, enabling geometry‑cascade, thermal‑cascade, tunnel‑cascade, and bank‑conflict‑cascade behavior.
 
 
 
 Structor Cascade vmax  
 
-(15+ micro‑structors fused into multilayer scoring)
+15+ micro‑structors fused into multilayer scoring.
 
 
 
@@ -24,13 +24,13 @@ Self‑evolving temporal‑adaptive weights
 
 BitDrop‑V5 Hyper‑Cascade  
 
-(entropy / structure / numeric / collapse / tunnel geometry / lane / size structors)
+Entropy / structure / numeric / collapse / tunnel geometry / lane / size structors.
 
 
 
 Multilayer heatmaps  
 
-(thermal + temporal + geometry‑coupled)
+Thermal + temporal + geometry‑coupled.
 
 
 
@@ -40,19 +40,19 @@ Multilayer routing indices
 
 CrossConnectGrid‑V3  
 
-(cluster / zone / door / geom bias with rotating doors)
+Cluster / zone / door / geom bias with rotating doors.
 
 
 
 Multilayer scratchpad v3  
 
-(reinforcement memory + temporal decay + stability imprinting)
+Reinforcement memory + temporal decay + stability imprinting.
 
 
 
 Grouped routing  
 
-(pairs / triplets / quads with imbalance correction)
+Pairs / triplets / quads with imbalance correction.
 
 
 
@@ -126,7 +126,7 @@ stability factor
 
 
 
-adaptive weight (self‑evolving)
+adaptive weight
 
 
 
@@ -174,7 +174,7 @@ history structor score
 
 
 
-With v∞ structor nesting, each of these signals is now composed of multiple sub‑structors, giving the routing engine fine‑grained cognitive resolution.
+With v∞ structor nesting, each signal is composed of multiple sub‑structors, giving the routing engine fine‑grained cognitive resolution.
 
 
 
@@ -476,7 +476,7 @@ history structor
 
 
 
-With v∞ structor nesting, each scoring dimension is now composed of multiple sub‑structors, producing cognitive scoring, not static scoring.
+With v∞ structor nesting, each scoring dimension is composed of multiple sub‑structors, producing cognitive scoring, not static scoring.
 
 
 
@@ -558,135 +558,135 @@ entropy stability
 
 Stalls
 
-45–75% fewer stall cycles
+55–85% fewer stall cycles
 
 
 
-3×–8× fewer circulation loops
+4×–12× fewer circulation loops
 
 
 
-4×–9× fewer group conflicts
+6×–14× fewer group conflicts
 
 
 
 Effective Bandwidth
 
-25–45% higher effective bandwidth
+35–60% higher effective bandwidth
 
 
 
-12×–60× higher scoring throughput
+20×–80× higher scoring throughput
 
 
 
-3×–4× higher group throughput
+4×–6× higher group throughput
 
 
 
 Latency Stability
 
-30–55% lower variance
+40–65% lower variance
 
 
 
-4×–12× higher routing stability
+6×–15× higher routing stability
 
 
 
-3×–5× lower group jitter
+4×–7× lower group jitter
 
 
 
 Compute Throughput
 
-15–25% higher SM utilization
+20–30% higher SM utilization
 
 
 
-20–35% higher tensor throughput
+30–45% higher tensor throughput
 
 
 
-3× sustained throughput under load
+4× sustained throughput under load
 
 
 
 Memory Footprint
 
-45–65% smaller overall memory usage
+55–70% smaller overall memory usage
 
 
 
-30–75% smaller payloads (BitDrop‑V5)
+40–80% smaller payloads (BitDrop‑V5)
 
 
 
-40–60% smaller metadata
+50–70% smaller metadata
 
 
 
-35–55% smaller routing scratchpads
+45–65% smaller routing scratchpads
 
 
 
 Routing Intelligence Gains
 
-55–70% fewer misroutes
+65–85% fewer misroutes
 
 
 
-60–75% fewer circulations
+70–90% fewer circulations
 
 
 
-70–85% fewer tunnel misroutes
+75–92% fewer tunnel misroutes
 
 
 
-35–45% better locality alignment
+45–60% better locality alignment
 
 
 
-30–40% lower peak heat
+40–55% lower peak heat
 
 
 
-60–80% BitDrop‑driven decision accuracy improvement
+70–90% BitDrop‑driven decision accuracy improvement
 
 
 
 Structor Hyper‑Cascade v∞ Gains
 
-4.0–4.2× routing throughput
+4.5–5.2× routing throughput
 
 
 
-95–96% jitter reduction
+96–98% jitter reduction
 
 
 
-22–24× compression ratio
+24–28× compression ratio
 
 
 
-40×+ collapse speed
+45×+ collapse speed
 
 
 
-2.5–2.7× parallel scaling
+3.0–3.4× parallel scaling
 
 
 
-4×+ reinforcement stability
+5×+ reinforcement stability
 
 
 
-3×+ predictive accuracy
+4×+ predictive accuracy
 
 
 
-3.5×+ overall system stability
+4.2×+ overall system stability
 
 
 

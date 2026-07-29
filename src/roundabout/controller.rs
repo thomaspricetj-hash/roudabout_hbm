@@ -325,6 +325,9 @@ struct CollapseStructor;
 struct EntropyStructor;
 struct LoadStructor;
 
+// NEW: Delta‑Frame Structor (DF‑HBM)
+struct DeltaStructor;
+
 struct MicroScores {
     pub locality: f32,
     pub geom: f32,
@@ -340,6 +343,7 @@ struct MicroScores {
     pub collapse: f32,
     pub entropy: f32,
     pub load: f32,
+    pub delta: f32,
 }
 
 struct MicroWeights {
@@ -357,6 +361,7 @@ struct MicroWeights {
     pub w_collapse: f32,
     pub w_entropy: f32,
     pub w_load: f32,
+    pub w_delta: f32,
     pub w_base: f32,
 }
 
@@ -376,6 +381,7 @@ impl MicroScores {
             + self.collapse * w.w_collapse
             + self.entropy * w.w_entropy
             + self.load * w.w_load
+            + self.delta * w.w_delta
     }
 }
 
@@ -487,6 +493,7 @@ impl AdaptiveWeightsStructor<'_> {
             w_collapse: 0.60,
             w_entropy: 0.50,
             w_load: 0.50,
+            w_delta: 0.60,
             w_base: 1.0,
         };
 
@@ -529,6 +536,11 @@ impl AdaptiveWeightsStructor<'_> {
         w.w_temporal *= 1.0 + temporal_factor * 0.6;
         w.w_entropy *= 1.0 + heat_factor * 0.4;
         w.w_load *= 1.0 + conflict_factor * 0.4;
+
+        // delta‑frame weighting — lean harder on change under chaos
+        if avg_heat > 0.75 || failure_sum > 0.0 {
+            w.w_delta *= 1.3;
+        }
 
         if req.payload_is_structured {
             w.w_geom *= 1.6;
@@ -1018,6 +1030,34 @@ impl LoadStructor {
     }
 }
 
+// Delta‑Frame Structor: approximate “only store change” using row/bank deltas
+impl DeltaStructor {
+    pub fn score(ctx: &CascadeContext, req: &HbmRequest, ch: usize) -> f32 {
+        let mut delta_score = 0.0;
+        let max_sp_layers = ctx.scratchpad.layers;
+
+        for layer in 0..max_sp_layers {
+            if let Some(last_row) = ctx.scratchpad.last_row[layer] {
+                if last_row != req.row {
+                    delta_score += 0.03;
+                }
+            }
+            if let Some(last_bank) = ctx.scratchpad.last_bank[layer] {
+                if last_bank != req.bank {
+                    delta_score += 0.03;
+                }
+            }
+            if let Some(last_exit) = ctx.scratchpad.last_channel[layer] {
+                if last_exit != ch {
+                    delta_score += 0.02;
+                }
+            }
+        }
+
+        delta_score
+    }
+}
+
 // ---------- fiber evaluation (vmax) ----------
 
 fn evaluate_fiber(
@@ -1056,6 +1096,7 @@ fn evaluate_fiber(
     let collapse = CollapseStructor::score(ctx, req, &ctx.channels[ch]);
     let entropy = EntropyStructor::score(ctx, req, &ctx.channels[ch]);
     let load = LoadStructor::score(ctx, req, &ctx.channels[ch]);
+    let delta = DeltaStructor::score(ctx, req, ch);
 
     let micro = MicroScores {
         locality,
@@ -1072,6 +1113,7 @@ fn evaluate_fiber(
         collapse,
         entropy,
         load,
+        delta,
     };
 
     let weights = adaptive.weights(ctx, req);
