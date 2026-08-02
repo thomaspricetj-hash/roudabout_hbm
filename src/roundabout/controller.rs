@@ -21,6 +21,186 @@ struct CascadeFiberResult {
     pub geom_score: f32,
 }
 
+//
+// ----------------- DAX: Master / Delta / Effective View primitives -----------------
+//
+// These are intentionally lightweight, storage-agnostic handles that let the
+// controller treat state as "master + deltas" without changing the routing logic.
+// We keep all existing routing logic intact and add DAX bookkeeping and APIs.
+//
+// The DeltaStore is a simple in-memory store for deltas used by the controller.
+// It exposes add_delta, rollback_to, branch_view, and get_effective_view.
+// The controller uses the scratchpad as the backing temporary storage for deltas,
+// but DeltaStore owns the delta metadata and indexing.
+//
+
+#[derive(Clone, Debug)]
+pub struct MasterBuffer {
+    pub id: usize,
+    /// Optional descriptive metadata (e.g., "base-kv", "shared-activations")
+    pub metadata: Option<String>,
+    /// A lightweight handle to the actual data location (could be an index into HBM, a pointer, or a file id)
+    pub data_handle: Option<usize>,
+}
+
+#[derive(Clone, Debug)]
+pub struct DeltaBuffer {
+    pub id: usize,
+    pub parent_master: usize,
+    pub layer: usize,
+    pub row: usize,
+    pub bank: usize,
+    /// Small serialized delta payload; controller/scratchpad can interpret this
+    pub payload: Vec<u8>,
+    /// Optional tag for agent/branch/time
+    pub tag: Option<String>,
+    /// Logical sequence number for rollback ordering
+    pub seq: u64,
+}
+
+#[derive(Clone, Debug)]
+pub struct EffectiveView {
+    pub master_id: usize,
+    pub delta_ids: Vec<usize>,
+    /// A compact fingerprint for quick equality checks
+    pub fingerprint: u64,
+}
+
+#[derive(Debug)]
+pub struct DeltaStore {
+    pub next_master_id: usize,
+    pub next_delta_id: usize,
+    pub masters: Vec<MasterBuffer>,
+    pub deltas: Vec<DeltaBuffer>,
+    /// Map of view handles (fingerprint -> EffectiveView) could be added later
+    pub views: Vec<EffectiveView>,
+}
+
+impl DeltaStore {
+    pub fn new() -> Self {
+        Self {
+            next_master_id: 1,
+            next_delta_id: 1,
+            masters: Vec::new(),
+            deltas: Vec::new(),
+            views: Vec::new(),
+        }
+    }
+
+    pub fn add_master(&mut self, metadata: Option<String>, data_handle: Option<usize>) -> usize {
+        let id = self.next_master_id;
+        self.next_master_id += 1;
+        self.masters.push(MasterBuffer {
+            id,
+            metadata,
+            data_handle,
+        });
+        id
+    }
+
+    pub fn add_delta(
+        &mut self,
+        parent_master: usize,
+        layer: usize,
+        row: usize,
+        bank: usize,
+        payload: Vec<u8>,
+        tag: Option<String>,
+        seq: u64,
+    ) -> usize {
+        let id = self.next_delta_id;
+        self.next_delta_id += 1;
+        self.deltas.push(DeltaBuffer {
+            id,
+            parent_master,
+            layer,
+            row,
+            bank,
+            payload,
+            tag,
+            seq,
+        });
+        id
+    }
+
+    /// Create an effective view from a master and a list of delta ids.
+    /// Returns the view fingerprint index.
+    pub fn create_view(&mut self, master_id: usize, delta_ids: Vec<usize>) -> usize {
+        let fingerprint = Self::compute_fingerprint(master_id, &delta_ids);
+        let view = EffectiveView {
+            master_id,
+            delta_ids,
+            fingerprint,
+        };
+        self.views.push(view);
+        self.views.len() - 1
+    }
+
+    pub fn get_view(&self, view_idx: usize) -> Option<&EffectiveView> {
+        self.views.get(view_idx)
+    }
+
+    pub fn compute_fingerprint(master_id: usize, delta_ids: &[usize]) -> u64 {
+        // Simple deterministic fingerprint: combine master id and delta ids.
+        // This is intentionally simple; replace with a stronger hash if needed.
+        let mut f: u64 = master_id as u64;
+        for &d in delta_ids {
+            f = f.wrapping_mul(31).wrapping_add(d as u64);
+        }
+        f
+    }
+
+    /// Rollback removes deltas with seq > target_seq for a given tag or master.
+    /// Returns number of deltas removed.
+    pub fn rollback_to(&mut self, master_id: usize, target_seq: u64, tag: Option<&str>) -> usize {
+        let before = self.deltas.len();
+        self.deltas.retain(|d| {
+            if d.parent_master != master_id {
+                true
+            } else {
+                if let Some(t) = tag {
+                    if let Some(ref dt) = d.tag {
+                        if dt != t {
+                            return true;
+                        }
+                    }
+                }
+                d.seq <= target_seq
+            }
+        });
+        let removed = before - self.deltas.len();
+        // Optionally prune views that reference removed deltas
+        self.views.retain(|v| v.delta_ids.iter().all(|id| self.deltas.iter().any(|d| d.id == *id)));
+        removed
+    }
+
+    /// Branching: create a new view that reuses existing delta ids and appends new delta id.
+    pub fn branch_view(&mut self, base_view_idx: usize, new_delta_id: usize) -> Option<usize> {
+        if let Some(base) = self.views.get(base_view_idx) {
+            let mut new_delta_ids = base.delta_ids.clone();
+            new_delta_ids.push(new_delta_id);
+            Some(self.create_view(base.master_id, new_delta_ids))
+        } else {
+            None
+        }
+    }
+
+    /// Get effective deltas for a master (ordered by seq)
+    pub fn deltas_for_master(&self, master_id: usize) -> Vec<&DeltaBuffer> {
+        let mut v: Vec<&DeltaBuffer> = self
+            .deltas
+            .iter()
+            .filter(|d| d.parent_master == master_id)
+            .collect();
+        v.sort_by_key(|d| d.seq);
+        v
+    }
+}
+
+//
+// ----------------- HbmRoundaboutController (with DAX fields and APIs) -----------------
+//
+
 #[derive(Debug)]
 pub struct HbmRoundaboutController {
     pub channels: Vec<HbmChannel>,
@@ -30,6 +210,11 @@ pub struct HbmRoundaboutController {
     pub ccg: CrossConnectGrid,
     pub scratchpad: Scratchpad,
     pub predictor: RepeatPredictor,
+
+    // DAX additions
+    pub delta_store: DeltaStore,
+    /// Default master buffer id used for requests that don't specify a master
+    pub default_master: Option<usize>,
 }
 
 // ---------- CrossConnectGrid helpers for vmax controller ----------
@@ -1199,7 +1384,68 @@ impl HbmRoundaboutController {
             arb: ArbitrationEngine::new(),
             scratchpad: Scratchpad::new(layers),
             predictor: RepeatPredictor::new(),
+            delta_store: DeltaStore::new(),
+            default_master: None,
         }
+    }
+
+    /// Add a master buffer to the DAX store and optionally set it as default.
+    pub fn add_master_buffer(&mut self, metadata: Option<String>, data_handle: Option<usize>, set_default: bool) -> usize {
+        let id = self.delta_store.add_master(metadata, data_handle);
+        if set_default {
+            self.default_master = Some(id);
+        }
+        id
+    }
+
+    /// Add a delta associated with the default master (if present) or a provided master id.
+    /// This is a convenience wrapper that serializes the request payload into a delta payload.
+    pub fn add_delta_for_request(
+        &mut self,
+        req: &HbmRequest,
+        master_id: Option<usize>,
+        layer: usize,
+        seq: u64,
+        tag: Option<String>,
+    ) -> Option<usize> {
+        let parent_master = master_id.or(self.default_master)?;
+        // Serialize a compact delta payload. For now we store a minimal representation:
+        // [row (u32), bank (u32), channel_id (u32), route_score (f32)]
+        // In practice, this should be a proper binary delta of the changed fields.
+        let mut payload: Vec<u8> = Vec::new();
+        payload.extend_from_slice(&(req.row as u32).to_le_bytes());
+        payload.extend_from_slice(&(req.bank as u32).to_le_bytes());
+        payload.extend_from_slice(&(req.channel_id as u32).to_le_bytes());
+        payload.extend_from_slice(&(req.locality_score.to_le_bytes()));
+
+        let delta_id = self.delta_store.add_delta(
+            parent_master,
+            layer,
+            req.row as usize,
+            req.bank as usize,
+            payload,
+            tag,
+            seq,
+        );
+        Some(delta_id)
+    }
+
+    /// Rollback deltas for a master to a target sequence number (optionally scoped by tag).
+    pub fn rollback_master_to(&mut self, master_id: usize, target_seq: u64, tag: Option<&str>) -> usize {
+        self.delta_store.rollback_to(master_id, target_seq, tag)
+    }
+
+    /// Create a branched view from an existing view index by appending a new delta id.
+    pub fn branch_view_from(&mut self, base_view_idx: usize, new_delta_id: usize) -> Option<usize> {
+        self.delta_store.branch_view(base_view_idx, new_delta_id)
+    }
+
+    /// Retrieve an effective view handle for a master (all deltas applied in order).
+    /// Returns an EffectiveView index in the delta_store.views vector.
+    pub fn get_effective_view_for_master(&mut self, master_id: usize) -> Option<usize> {
+        let deltas = self.delta_store.deltas_for_master(master_id);
+        let delta_ids: Vec<usize> = deltas.iter().map(|d| d.id).collect();
+        Some(self.delta_store.create_view(master_id, delta_ids))
     }
 
     pub fn route_request(&mut self, mut req: HbmRequest) -> Option<usize> {
@@ -1398,6 +1644,23 @@ impl HbmRoundaboutController {
                 }
             }
 
+            //
+            // DAX bookkeeping: create a delta entry for this routing decision.
+            // We intentionally do not change routing logic — we only record a compact delta
+            // that can later be used for rollback, branching, or effective view construction.
+            //
+            if let Some(master_id) = self.default_master {
+                // Use layer 0 as a conservative default for delta placement; callers can add more precise deltas later.
+                let seq = req.id as u64; // use request id as a simple sequence
+                let tag = Some(format!("route:ch:{}", ch_id));
+                if let Some(delta_id) = self.add_delta_for_request(&req, Some(master_id), 0, seq, tag) {
+                    // Optionally create or update an effective view for the master
+                    let _view_idx = self.get_effective_view_for_master(master_id);
+                    // We don't need to use view_idx here; it's available for external inspection.
+                    let _ = delta_id;
+                }
+            }
+
             Some(ch_id)
         } else {
             req.circulations += 1;
@@ -1418,3 +1681,4 @@ impl HbmRoundaboutController {
         }
     }
 }
+
