@@ -6,6 +6,7 @@ use super::{
     index::RoutingIndex,
     channel::HbmChannel,
     grid::CrossConnectGrid,
+    controller::{DeltaBuffer, DeltaStore, EffectiveView},
 };
 
 #[derive(Debug, Clone)]
@@ -33,7 +34,7 @@ pub struct Scratchpad {
     pub adaptive_memory: Vec<f32>,
     pub stability_memory: Vec<f32>,
 
-    // NEW: Tesla valve directional memory
+    // Tesla valve directional memory
     pub valve_forward_memory: Vec<f32>,
     pub valve_reverse_memory: Vec<f32>,
     pub valve_oscillation_memory: Vec<f32>,
@@ -65,16 +66,107 @@ impl Scratchpad {
             adaptive_memory: vec![0.0; layers],
             stability_memory: vec![0.0; layers],
 
-            // Tesla valve directional memory
             valve_forward_memory: vec![0.0; layers],
             valve_reverse_memory: vec![0.0; layers],
             valve_oscillation_memory: vec![0.0; layers],
         }
     }
 
-    // -------------------------------------------------------------------------
+    // =========================================================================
+    // DAX INTEGRATION — FULL MAX LOGIC
+    // =========================================================================
+
+    /// Reset scratchpad state before applying deltas or views
+    pub fn clear(&mut self) {
+        for layer in 0..self.layers {
+            self.history[layer].fill(None);
+            self.failures[layer] = 0;
+
+            self.last_row[layer] = None;
+            self.last_bank[layer] = None;
+            self.last_channel[layer] = None;
+
+            self.refresh_events[layer] = 0;
+            self.ecc_events[layer] = 0;
+
+            self.success_reinforce[layer] = 0.0;
+            self.failure_penalty[layer] = 0.0;
+
+            self.entropy_memory[layer] = 0.0;
+            self.size_memory[layer] = 0.0;
+            self.structure_memory[layer] = 0.0;
+            self.numeric_memory[layer] = 0.0;
+            self.tunnel_memory[layer] = 0.0;
+
+            self.adaptive_memory[layer] = 0.0;
+            self.stability_memory[layer] = 0.0;
+
+            self.valve_forward_memory[layer] = 0.0;
+            self.valve_reverse_memory[layer] = 0.0;
+            self.valve_oscillation_memory[layer] = 0.0;
+        }
+    }
+
+    /// Apply a single delta to scratchpad state
+    pub fn apply_delta(&mut self, delta: &DeltaBuffer) {
+        let layer = delta.layer.min(self.layers - 1);
+
+        // Update locality
+        self.last_row[layer] = Some(delta.row as u32);
+        self.last_bank[layer] = Some(delta.bank as u32);
+
+        // Update history (channel exit)
+        self.history[layer].rotate_right(1);
+        self.history[layer][0] = Some(delta.row % 64); // synthetic exit mapping
+
+        // Update memories based on delta payload
+        let payload = &delta.payload;
+
+        if !payload.is_empty() {
+            let entropy = (payload[0] as f32) / 255.0;
+            let structure = (payload[1] as f32) / 255.0;
+            let valve = (payload[2] as f32) / 255.0;
+
+            self.entropy_memory[layer] += entropy * 0.05;
+            self.structure_memory[layer] += structure * 0.05;
+            self.valve_forward_memory[layer] += valve * 0.04;
+        }
+
+        // Temporal memory from sequence
+        self.stability_memory[layer] += (delta.seq as f32 * 0.0001).min(0.05);
+    }
+
+    /// Apply an effective view (all deltas) to scratchpad
+    pub fn apply_effective_view(&mut self, view: &EffectiveView, store: &DeltaStore) {
+        self.clear();
+        for delta_id in &view.delta_ids {
+            if let Some(delta) = store.deltas.iter().find(|d| d.id == *delta_id) {
+                self.apply_delta(delta);
+            }
+        }
+    }
+
+    /// Rollback scratchpad to a target sequence
+    pub fn rollback_to(&mut self, master_id: usize, store: &DeltaStore, target_seq: u64) {
+        self.clear();
+        let deltas = store.deltas_for_master(master_id);
+        for d in deltas {
+            if d.seq <= target_seq {
+                self.apply_delta(d);
+            }
+        }
+    }
+
+    /// Switch scratchpad to a specific DAX view
+    pub fn switch_view(&mut self, view_idx: usize, store: &DeltaStore) {
+        if let Some(view) = store.get_view(view_idx) {
+            self.apply_effective_view(view, store);
+        }
+    }
+
+    // =========================================================================
     // SUCCESS / FAILURE reinforcement (Tesla valve integrated)
-    // -------------------------------------------------------------------------
+    // =========================================================================
 
     pub fn record_success(&mut self, layer: usize, exit_id: usize) {
         if let Some(hist) = self.history.get_mut(layer) {
@@ -88,7 +180,6 @@ impl Scratchpad {
             *fp *= 0.90;
         }
 
-        // BitDrop memories cool on success
         if let Some(e) = self.entropy_memory.get_mut(layer) { *e *= 0.95; }
         if let Some(s) = self.size_memory.get_mut(layer) { *s *= 0.95; }
         if let Some(st) = self.structure_memory.get_mut(layer) { *st *= 0.95; }
@@ -98,7 +189,6 @@ impl Scratchpad {
         if let Some(a) = self.adaptive_memory.get_mut(layer) { *a *= 0.97; }
         if let Some(stab) = self.stability_memory.get_mut(layer) { *stab *= 0.97; }
 
-        // Tesla valve: forward flow reinforced
         if let Some(vf) = self.valve_forward_memory.get_mut(layer) {
             *vf += 0.04;
         }
@@ -114,7 +204,6 @@ impl Scratchpad {
         if let Some(f) = self.failures.get_mut(layer) { *f += 1; }
         if let Some(fp) = self.failure_penalty.get_mut(layer) { *fp += 0.05; }
 
-        // BitDrop memories increase on failure
         if let Some(e) = self.entropy_memory.get_mut(layer) { *e += 0.02; }
         if let Some(s) = self.size_memory.get_mut(layer) { *s += 0.02; }
         if let Some(st) = self.structure_memory.get_mut(layer) { *st += 0.02; }
@@ -124,7 +213,6 @@ impl Scratchpad {
         if let Some(a) = self.adaptive_memory.get_mut(layer) { *a += 0.03; }
         if let Some(stab) = self.stability_memory.get_mut(layer) { *stab += 0.03; }
 
-        // Tesla valve: reverse flow + oscillation penalized
         if let Some(vr) = self.valve_reverse_memory.get_mut(layer) {
             *vr += 0.04;
         }
@@ -133,31 +221,31 @@ impl Scratchpad {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Locality + refresh + ECC (unchanged)
-    // -------------------------------------------------------------------------
+    // =========================================================================
+    // Locality + refresh + ECC
+    // =========================================================================
 
     pub fn record_locality(&mut self, layer: usize, row: u32, bank: u32, channel_id: usize) {
-        if let Some(r) = self.last_row.get_mut(layer) { *r = Some(row); }
-        if let Some(b) = self.last_bank.get_mut(layer) { *b = Some(bank); }
-        if let Some(c) = self.last_channel.get_mut(layer) { *c = Some(channel_id); }
+        self.last_row[layer] = Some(row);
+        self.last_bank[layer] = Some(bank);
+        self.last_channel[layer] = Some(channel_id);
 
         if let Some(n) = self.numeric_memory.get_mut(layer) { *n += 0.03; }
     }
 
     pub fn record_refresh_event(&mut self, layer: usize) {
-        if let Some(r) = self.refresh_events.get_mut(layer) { *r += 1; }
-        if let Some(stab) = self.stability_memory.get_mut(layer) { *stab += 0.02; }
+        self.refresh_events[layer] += 1;
+        self.stability_memory[layer] += 0.02;
     }
 
     pub fn record_ecc_event(&mut self, layer: usize) {
-        if let Some(e) = self.ecc_events.get_mut(layer) { *e += 1; }
-        if let Some(stab) = self.stability_memory.get_mut(layer) { *stab += 0.03; }
+        self.ecc_events[layer] += 1;
+        self.stability_memory[layer] += 0.03;
     }
 
-    // -------------------------------------------------------------------------
+    // =========================================================================
     // BitDrop + Tesla valve bitflow memory
-    // -------------------------------------------------------------------------
+    // =========================================================================
 
     pub fn record_bitdrop(
         &mut self,
@@ -173,30 +261,23 @@ impl Scratchpad {
         valve_reverse: f32,
         valve_oscillation: f32,
     ) {
-        if let Some(e) = self.entropy_memory.get_mut(layer) { *e += entropy * 0.05; }
-        if let Some(s) = self.size_memory.get_mut(layer) { *s += size * 0.05; }
-        if let Some(st) = self.structure_memory.get_mut(layer) { *st += structure * 0.05; }
-        if let Some(n) = self.numeric_memory.get_mut(layer) { *n += numeric * 0.05; }
-        if let Some(t) = self.tunnel_memory.get_mut(layer) { *t += tunnel * 0.05; }
+        self.entropy_memory[layer] += entropy * 0.05;
+        self.size_memory[layer] += size * 0.05;
+        self.structure_memory[layer] += structure * 0.05;
+        self.numeric_memory[layer] += numeric * 0.05;
+        self.tunnel_memory[layer] += tunnel * 0.05;
 
-        if let Some(a) = self.adaptive_memory.get_mut(layer) { *a += adaptive * 0.04; }
-        if let Some(stab) = self.stability_memory.get_mut(layer) { *stab += (1.0 - stability) * 0.04; }
+        self.adaptive_memory[layer] += adaptive * 0.04;
+        self.stability_memory[layer] += (1.0 - stability) * 0.04;
 
-        // Tesla valve directional memory
-        if let Some(vf) = self.valve_forward_memory.get_mut(layer) {
-            *vf += valve_forward * 0.05;
-        }
-        if let Some(vr) = self.valve_reverse_memory.get_mut(layer) {
-            *vr += valve_reverse * 0.06;
-        }
-        if let Some(vo) = self.valve_oscillation_memory.get_mut(layer) {
-            *vo += valve_oscillation * 0.07;
-        }
+        self.valve_forward_memory[layer] += valve_forward * 0.05;
+        self.valve_reverse_memory[layer] += valve_reverse * 0.06;
+        self.valve_oscillation_memory[layer] += valve_oscillation * 0.07;
     }
 
-    // -------------------------------------------------------------------------
+    // =========================================================================
     // APPLY BIAS (Tesla valve integrated)
-    // -------------------------------------------------------------------------
+    // =========================================================================
 
     pub fn apply_bias_parallel(
         &self,
@@ -265,7 +346,6 @@ impl Scratchpad {
                     self.adaptive_memory[layer] * 0.04 +
                     self.stability_memory[layer] * 0.04;
 
-                // Tesla valve directional bias
                 let valve_bias =
                     self.valve_forward_memory[layer] * -0.08 +
                     self.valve_reverse_memory[layer] * 0.10 +
@@ -291,5 +371,6 @@ impl Scratchpad {
         }
     }
 }
+
 
 

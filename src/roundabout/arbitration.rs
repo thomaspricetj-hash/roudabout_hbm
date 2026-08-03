@@ -6,6 +6,7 @@ use super::{
     heatmap::Heatmap,
     index::RoutingIndex,
     grid::CrossConnectGrid,
+    controller::{DeltaBuffer, DeltaStore, EffectiveView},
 };
 
 #[derive(Debug, Default)]
@@ -230,7 +231,6 @@ impl ArbitrationEngine {
         ccg: &CrossConnectGrid,
         layer_count: usize,
     ) -> Option<usize> {
-        // FIXED: req.raw_payload DOES NOT EXIST
         let valve_score = 0.0;
 
         channels
@@ -287,7 +287,6 @@ impl ArbitrationEngine {
         ccg: &CrossConnectGrid,
         layer_count: usize,
     ) -> Option<usize> {
-        // FIXED: req.raw_payload DOES NOT EXIST
         let valve_score = 0.0;
 
         channels
@@ -330,5 +329,127 @@ impl ArbitrationEngine {
             .min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(id, _)| id)
     }
+
+    // -------------------------------------------------------------------------
+    // DAX‑aware arbitration (views, rollback, deltas)
+    // -------------------------------------------------------------------------
+
+    pub fn choose_best_channel_with_dax_view(
+        &self,
+        req: &HbmRequest,
+        channels: &[HbmChannel],
+        heatmap: &Heatmap,
+        ccg: &CrossConnectGrid,
+        layer_count: usize,
+        store: &DeltaStore,
+        view: &EffectiveView,
+    ) -> Option<usize> {
+        channels
+            .par_iter()
+            .filter_map(|ch| {
+                let mut ch_clone = ch.clone();
+                ch_clone.apply_effective_view(view, store);
+
+                let other_load = ch_clone.pair_id.and_then(|pid| {
+                    channels
+                        .iter()
+                        .find(|c| c.pair_id == Some(pid) && c.id != ch_clone.id)
+                        .map(|c| c.metrics.load)
+                });
+
+                if !ch_clone.can_accept_with_pair(req.bank_id, other_load) {
+                    return None;
+                }
+
+                let mut score = Self::arbitration_score_parallel(
+                    req,
+                    &ch_clone,
+                    heatmap,
+                    ccg,
+                    layer_count,
+                );
+
+                if req.is_tunnel_escalated {
+                    if ch_clone.is_tunnel {
+                        score -= 0.10;
+                    } else {
+                        score += 0.05;
+                    }
+                }
+
+                if ch_clone.group_size > 1 {
+                    score -= (ch_clone.group_size as f32 - 1.0) * 0.02;
+                }
+
+                Some((ch_clone.id, score))
+            })
+            .min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(id, _)| id)
+    }
+
+    pub fn choose_best_channel_with_rollback(
+        &self,
+        req: &HbmRequest,
+        channels: &[HbmChannel],
+        heatmap: &Heatmap,
+        ccg: &CrossConnectGrid,
+        layer_count: usize,
+        store: &DeltaStore,
+        master_id: usize,
+        target_seq: u64,
+    ) -> Option<usize> {
+        channels
+            .par_iter()
+            .filter_map(|ch| {
+                let mut ch_clone = ch.clone();
+                ch_clone.rollback_to(master_id, store, target_seq);
+
+                let other_load = ch_clone.pair_id.and_then(|pid| {
+                    channels
+                        .iter()
+                        .find(|c| c.pair_id == Some(pid) && c.id != ch_clone.id)
+                        .map(|c| c.metrics.load)
+                });
+
+                if !ch_clone.can_accept_with_pair(req.bank_id, other_load) {
+                    return None;
+                }
+
+                let mut score = Self::arbitration_score_parallel(
+                    req,
+                    &ch_clone,
+                    heatmap,
+                    ccg,
+                    layer_count,
+                );
+
+                if req.is_tunnel_escalated {
+                    if ch_clone.is_tunnel {
+                        score -= 0.10;
+                    } else {
+                        score += 0.05;
+                    }
+                }
+
+                if ch_clone.group_size > 1 {
+                    score -= (ch_clone.group_size as f32 - 1.0) * 0.02;
+                }
+
+                Some((ch_clone.id, score))
+            })
+            .min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(id, _)| id)
+    }
+
+    pub fn dax_delta_influence(
+        &self,
+        _req: &HbmRequest,
+        _delta: &DeltaBuffer,
+        _channel: &HbmChannel,
+    ) -> f32 {
+        // Hook for future fine‑grained delta‑based arbitration shaping
+        0.0
+    }
 }
+
 

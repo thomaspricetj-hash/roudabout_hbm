@@ -5,6 +5,7 @@ use super::{
     request::HbmRequest,
     heatmap::Heatmap,
     grid::CrossConnectGrid,
+    controller::{DeltaBuffer, DeltaStore, EffectiveView},
 };
 
 #[derive(Debug, Clone)]
@@ -46,7 +47,6 @@ impl RoutingIndex {
             score += base + bias;
         }
 
-        // Tesla valve directional influence
         score += Self::valve_component(request, channel);
 
         score
@@ -175,7 +175,6 @@ impl RoutingIndex {
         score -= heatmap.refresh_heat[channel.id] * 0.30;
         score -= heatmap.ecc_heat[channel.id] * 0.25;
 
-        // Tesla valve directional influence
         score += channel.valve_forward * -0.05;
         score += channel.valve_reverse * 0.06;
         score += channel.valve_oscillation * 0.08;
@@ -199,7 +198,6 @@ impl RoutingIndex {
             }
         }
 
-        // Tesla valve directional influence
         score += channel.valve_forward * -0.04;
         score += channel.valve_reverse * 0.05;
         score += channel.valve_oscillation * 0.06;
@@ -217,7 +215,6 @@ impl RoutingIndex {
             - (channel.metrics.ecc_activity * 0.30)
             - (channel.metrics.refresh_pressure * 0.20);
 
-        // Tesla valve directional influence
         score += channel.valve_forward * 0.05;
         score -= channel.valve_reverse * 0.08;
         score -= channel.valve_oscillation * 0.10;
@@ -247,7 +244,6 @@ impl RoutingIndex {
             score += 0.06;
         }
 
-        // Tesla valve directional influence
         score += request.valve_forward * -0.06;
         score += request.valve_reverse * 0.08;
         score += request.valve_oscillation * 0.10;
@@ -272,7 +268,6 @@ impl RoutingIndex {
             score += (channel.group_size as f32 - 1.0) * 0.02;
         }
 
-        // Tesla valve directional influence
         score += channel.valve_forward * -0.05;
         score += channel.valve_reverse * 0.07;
         score += channel.valve_oscillation * 0.09;
@@ -359,7 +354,112 @@ impl RoutingIndex {
 
         df_req + df_ch + df_geom + df_heat + valve_component
     }
+
+    // -------------------------------------------------------------------------
+    // DAX‑aware scoring helpers (delta / views / rollback)
+    // -------------------------------------------------------------------------
+
+    pub fn dax_delta_score(
+        &self,
+        _req: &HbmRequest,
+        _channel: &HbmChannel,
+        delta: &DeltaBuffer,
+    ) -> f32 {
+        let payload = &delta.payload;
+        let mut score = 0.0;
+
+        if payload.len() >= 4 {
+            let entropy = (payload[0] as f32) / 255.0;
+            let size_norm = (payload[1] as f32) / 255.0;
+            let structure = (payload[2] as f32) / 255.0;
+            let numeric = (payload[3] as f32) / 255.0;
+
+            score += (1.0 - entropy) * 0.10;
+            score += (1.0 - size_norm) * 0.08;
+            score += structure * 0.10;
+            score += numeric * 0.10;
+        }
+
+        if payload.len() >= 7 {
+            let vf = (payload[4] as f32) / 255.0;
+            let vr = (payload[5] as f32) / 255.0;
+            let vo = (payload[6] as f32) / 255.0;
+
+            score += vf * -0.06;
+            score += vr * 0.08;
+            score += vo * 0.10;
+        }
+
+        score += (delta.seq as f32 * 0.0001).min(0.05);
+
+        score
+    }
+
+    pub fn composite_index_score_with_view(
+        &self,
+        request: &HbmRequest,
+        channel: &HbmChannel,
+        heatmap: &Heatmap,
+        ccg: &CrossConnectGrid,
+        layer_count: usize,
+        store: &DeltaStore,
+        view: &EffectiveView,
+    ) -> f32 {
+        let mut ch_clone = channel.clone();
+        ch_clone.apply_effective_view(view, store);
+
+        Self::composite_index_score(request, &ch_clone, heatmap, ccg, layer_count)
+    }
+
+    pub fn composite_index_score_with_rollback(
+        &self,
+        request: &HbmRequest,
+        channel: &HbmChannel,
+        heatmap: &Heatmap,
+        ccg: &CrossConnectGrid,
+        layer_count: usize,
+        store: &DeltaStore,
+        master_id: usize,
+        target_seq: u64,
+    ) -> f32 {
+        let mut ch_clone = channel.clone();
+        ch_clone.rollback_to(master_id, store, target_seq);
+
+        Self::composite_index_score(request, &ch_clone, heatmap, ccg, layer_count)
+    }
+
+    pub fn dfhbm_index_score_with_view(
+        &self,
+        request: &HbmRequest,
+        channel: &HbmChannel,
+        ccg: &CrossConnectGrid,
+        heatmap: &Heatmap,
+        store: &DeltaStore,
+        view: &EffectiveView,
+    ) -> f32 {
+        let mut ch_clone = channel.clone();
+        ch_clone.apply_effective_view(view, store);
+
+        Self::dfhbm_index_score(request, &ch_clone, ccg, heatmap)
+    }
+
+    pub fn dfhbm_index_score_with_rollback(
+        &self,
+        request: &HbmRequest,
+        channel: &HbmChannel,
+        ccg: &CrossConnectGrid,
+        heatmap: &Heatmap,
+        store: &DeltaStore,
+        master_id: usize,
+        target_seq: u64,
+    ) -> f32 {
+        let mut ch_clone = channel.clone();
+        ch_clone.rollback_to(master_id, store, target_seq);
+
+        Self::dfhbm_index_score(request, &ch_clone, ccg, heatmap)
+    }
 }
+
 
 
 

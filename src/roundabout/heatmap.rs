@@ -1,5 +1,6 @@
 use rayon::prelude::*;
 use super::grid::CrossConnectGrid;
+use super::controller::{DeltaBuffer, DeltaStore, EffectiveView};
 
 #[derive(Debug, Clone)]
 pub struct Heatmap {
@@ -22,7 +23,7 @@ pub struct Heatmap {
     pub bitdrop_tunnel_heat: Vec<f32>,
     pub bitdrop_locality_heat: Vec<f32>,
 
-    // NEW: Tesla valve directional heat fields
+    // Tesla valve directional heat fields
     pub valve_forward_heat: Vec<f32>,
     pub valve_reverse_heat: Vec<f32>,
     pub valve_oscillation_heat: Vec<f32>,
@@ -50,10 +51,102 @@ impl Heatmap {
             bitdrop_tunnel_heat: vec![0.0; channel_count],
             bitdrop_locality_heat: vec![0.0; channel_count],
 
-            // Tesla valve directional heat fields
             valve_forward_heat: vec![0.0; channel_count],
             valve_reverse_heat: vec![0.0; channel_count],
             valve_oscillation_heat: vec![0.0; channel_count],
+        }
+    }
+
+    // =========================================================================
+    // DAX INTEGRATION — FULL MAX LOGIC
+    // =========================================================================
+
+    pub fn clear(&mut self) {
+        for layer_vec in &mut self.layers {
+            layer_vec.fill(0.0);
+        }
+        for layer_vec in &mut self.scratch {
+            layer_vec.fill(0.0);
+        }
+        for rot in &mut self.door_rotation {
+            rot.fill(0);
+        }
+
+        self.row_conflict.fill(0.0);
+        self.bank_busy.fill(0.0);
+        self.channel_sat.fill(0.0);
+        self.refresh_heat.fill(0.0);
+        self.ecc_heat.fill(0.0);
+
+        self.bitdrop_payload_heat.fill(0.0);
+        self.bitdrop_tunnel_heat.fill(0.0);
+        self.bitdrop_locality_heat.fill(0.0);
+
+        self.valve_forward_heat.fill(0.0);
+        self.valve_reverse_heat.fill(0.0);
+        self.valve_oscillation_heat.fill(0.0);
+    }
+
+    pub fn apply_delta(&mut self, delta: &DeltaBuffer) {
+        let layer_idx = delta.layer.min(self.layers.len().saturating_sub(1));
+        let channel_count = self.layers.get(0).map(|v| v.len()).unwrap_or(0);
+        if channel_count == 0 {
+            return;
+        }
+        let ch = (delta.row as usize) % channel_count;
+
+        if let Some(layer_vec) = self.layers.get_mut(layer_idx) {
+            if let Some(v) = layer_vec.get_mut(ch) {
+                *v += 0.08;
+            }
+        }
+
+        self.row_conflict[ch] += 0.03;
+        self.bank_busy[ch] += 0.03;
+        self.channel_sat[ch] += 0.02;
+
+        let payload = &delta.payload;
+        if payload.len() >= 3 {
+            let entropy = (payload[0] as f32) / 255.0;
+            let tunnel = (payload[1] as f32) / 255.0;
+            let locality = (payload[2] as f32) / 255.0;
+
+            self.bitdrop_payload_heat[ch] += entropy * 0.06;
+            self.bitdrop_tunnel_heat[ch] += tunnel * 0.06;
+            self.bitdrop_locality_heat[ch] += locality * 0.05;
+
+            self.valve_forward_heat[ch] += (1.0 - entropy) * 0.04;
+            self.valve_reverse_heat[ch] += tunnel * 0.05;
+            self.valve_oscillation_heat[ch] += locality * 0.06;
+        }
+
+        let seq_heat = (delta.seq as f32 * 0.0001).min(0.05);
+        self.refresh_heat[ch] += seq_heat * 0.5;
+        self.ecc_heat[ch] += seq_heat * 0.3;
+    }
+
+    pub fn apply_effective_view(&mut self, view: &EffectiveView, store: &DeltaStore) {
+        self.clear();
+        for delta_id in &view.delta_ids {
+            if let Some(delta) = store.deltas.iter().find(|d| d.id == *delta_id) {
+                self.apply_delta(delta);
+            }
+        }
+    }
+
+    pub fn rollback_to(&mut self, master_id: usize, store: &DeltaStore, target_seq: u64) {
+        self.clear();
+        let deltas = store.deltas_for_master(master_id);
+        for d in deltas {
+            if d.seq <= target_seq {
+                self.apply_delta(d);
+            }
+        }
+    }
+
+    pub fn switch_view(&mut self, view_idx: usize, store: &DeltaStore) {
+        if let Some(view) = store.get_view(view_idx) {
+            self.apply_effective_view(view, store);
         }
     }
 
@@ -98,7 +191,6 @@ impl Heatmap {
         self.bitdrop_tunnel_heat.par_iter_mut().for_each(|v| *v *= self.decay);
         self.bitdrop_locality_heat.par_iter_mut().for_each(|v| *v *= self.decay);
 
-        // Tesla valve directional decay
         self.valve_forward_heat.par_iter_mut().for_each(|v| *v *= self.decay);
         self.valve_reverse_heat.par_iter_mut().for_each(|v| *v *= self.decay);
         self.valve_oscillation_heat.par_iter_mut().for_each(|v| *v *= self.decay);
@@ -195,7 +287,6 @@ impl Heatmap {
         normalize_vec(&mut self.bitdrop_tunnel_heat);
         normalize_vec(&mut self.bitdrop_locality_heat);
 
-        // Tesla valve directional normalization
         normalize_vec(&mut self.valve_forward_heat);
         normalize_vec(&mut self.valve_reverse_heat);
         normalize_vec(&mut self.valve_oscillation_heat);
@@ -282,10 +373,9 @@ impl Heatmap {
         acc += self.bitdrop_tunnel_heat[channel] * 0.20;
         acc += self.bitdrop_locality_heat[channel] * 0.20;
 
-        // Tesla valve directional heat
-        acc += self.valve_forward_heat[channel] * -0.20;   // forward flow reduces heat
-        acc += self.valve_reverse_heat[channel] * 0.25;    // reverse flow increases heat
-        acc += self.valve_oscillation_heat[channel] * 0.30; // oscillation increases heat sharply
+        acc += self.valve_forward_heat[channel] * -0.20;
+        acc += self.valve_reverse_heat[channel] * 0.25;
+        acc += self.valve_oscillation_heat[channel] * 0.30;
 
         acc
     }
@@ -300,5 +390,3 @@ impl Heatmap {
         heat - bias
     }
 }
-
-

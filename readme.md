@@ -1,12 +1,12 @@
-⭐ HBM Roundabout Controller — Cognitive Routing Edition
+⭐ HBM Roundabout Controller — Cognitive Routing Edition (v∞ Hyper‑Cascade)
 
-v∞ Hyper‑Cascade + Tesla‑Valve Stabilizer + DAX Delta‑State Engine
+Tesla‑Valve Stabilizer + DAX Delta‑State Engine + BitDrop‑V5 Hyper‑Cascade
 
 A fully parallel, multilayer, heatmap‑driven, grid‑biased, reinforcement‑aware, tunneling‑augmented, group‑balanced, predictive, adaptive, entropy‑aware, collapse‑aware, geometry‑aware, conflict‑aware, directionality‑aware, delta‑state‑aware memory‑routing architecture for High Bandwidth Memory (HBM).
 
 
 
-Inspired by traffic roundabouts, this controller eliminates stalls, reduces contention, bypasses congestion zones via virtual tunnel exits, stabilizes chaotic payloads via Tesla‑Valve directional flow analysis, and now — with DAX delta‑state routing — supports reversible routing, cheap branching, multi‑agent overlays, and sparse cognitive updates.
+Inspired by traffic roundabouts, this controller eliminates stalls, reduces contention, bypasses congestion zones via virtual tunnel exits, stabilizes chaotic payloads via Tesla‑Valve directional flow analysis, and — with DAX delta‑state routing — supports reversible routing, cheap branching, multi‑agent overlays, and sparse cognitive updates.
 
 
 
@@ -89,10 +89,6 @@ All structors run in parallel across fibers and layers.
 
 
 ⭐ Structor Hyper‑Cascade v∞ (Nested Structors Inside Structors)
-
-Nested structor cascades:
-
-
 
 Geometry Cascade
 
@@ -468,9 +464,9 @@ Routing Throughput
 
 8×–40× higher throughput
 
-Tesla‑Valve adds 1.5×–3× stability throughput
+Tesla‑Valve: +1.5×–3×
 
-DAX adds 2×–6× delta‑state routing throughput
+DAX: +2×–6×
 
 
 
@@ -490,9 +486,9 @@ Bandwidth
 
 15–30% higher effective bandwidth
 
-Tesla‑Valve: 10–20% bandwidth stability gain
+Tesla‑Valve: +10–20% stability
 
-DAX: 20–40% delta‑state bandwidth reduction
+DAX: +20–40% delta‑state shrinkage
 
 
 
@@ -502,9 +498,9 @@ Latency Stability
 
 95–96% jitter reduction
 
-Tesla‑Valve: 3×–6× jitter suppression
+Tesla‑Valve: 3×–6× suppression
 
-DAX: 2×–4× delta‑state stabilization
+DAX: 2×–4× stabilization
 
 
 
@@ -524,9 +520,9 @@ Routing Intelligence
 
 70–90% fewer tunnel misroutes
 
-Tesla‑Valve: 4×–9× stability improvement
+Tesla‑Valve: 4×–9× stability
 
-DAX: 3×–6× delta‑state accuracy improvement
+DAX: 3×–6× accuracy
 
 
 
@@ -557,6 +553,8 @@ src/
 &#x20;   channel.rs
 
 &#x20;   request.rs
+
+
 
 simulation/
 

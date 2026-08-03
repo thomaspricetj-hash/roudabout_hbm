@@ -4,6 +4,7 @@ use super::{
     metrics::ChannelMetrics,
     heatmap::Heatmap,
     grid::CrossConnectGrid,
+    controller::{DeltaBuffer, DeltaStore, EffectiveView},
 };
 
 // BitDrop‑V2 integration
@@ -60,7 +61,7 @@ pub struct HbmChannel {
     pub structured_load_bias: f32,
     pub structured_stability_bias: f32,
 
-    // NEW: Tesla valve directional memory per‑channel
+    // Tesla valve directional memory per‑channel
     pub valve_forward: f32,
     pub valve_reverse: f32,
     pub valve_oscillation: f32,
@@ -107,7 +108,6 @@ impl HbmChannel {
             structured_load_bias: 0.0,
             structured_stability_bias: 0.0,
 
-            // Tesla valve directional memory
             valve_forward: 0.0,
             valve_reverse: 0.0,
             valve_oscillation: 0.0,
@@ -115,7 +115,110 @@ impl HbmChannel {
     }
 
     // -------------------------------------------------------------------------
-    // NEW: Structure‑aware scoring
+    // DAX integration (channel‑level, max logic)
+    // -------------------------------------------------------------------------
+
+    pub fn apply_delta(&mut self, delta: &DeltaBuffer) {
+        // Synthetic mapping of delta payload into channel metrics/biases
+        let payload = &delta.payload;
+
+        if payload.len() >= 4 {
+            let entropy = (payload[0] as f32) / 255.0;
+            let size_norm = (payload[1] as f32) / 255.0;
+            let structure = (payload[2] as f32) / 255.0;
+            let numeric = (payload[3] as f32) / 255.0;
+
+            // Biases driven by DAX delta
+            self.payload_entropy_bias += (1.0 - entropy) * 0.08;
+            self.payload_size_bias += (1.0 - size_norm) * 0.06;
+            self.payload_structure_bias += structure * 0.10;
+            self.payload_numeric_bias += numeric * 0.10;
+
+            // Tunnel hint from numeric/structure
+            if numeric > 0.6 || structure > 0.7 {
+                self.is_tunnel = true;
+                self.tunnel_bias += 0.04;
+            }
+        }
+
+        if payload.len() >= 7 {
+            let vf = (payload[4] as f32) / 255.0;
+            let vr = (payload[5] as f32) / 255.0;
+            let vo = (payload[6] as f32) / 255.0;
+
+            self.valve_forward += vf * 0.08;
+            self.valve_reverse += vr * 0.09;
+            self.valve_oscillation += vo * 0.10;
+        }
+
+        // Load and stability from sequence
+        let seq_factor = (delta.seq as f32 * 0.0001).min(0.05);
+        self.metrics.load = (self.metrics.load + seq_factor).min(self.max_load);
+        self.metrics.stability_score =
+            (self.metrics.stability_score + (0.05 - seq_factor)).clamp(0.0, 1.5);
+
+        // Locality hint from row/bank
+        self.locality_score += 0.02;
+    }
+
+    pub fn apply_effective_view(&mut self, view: &EffectiveView, store: &DeltaStore) {
+        // Rebuild channel‑level biases/metrics from all deltas in the view
+        self.payload_entropy_bias = 0.0;
+        self.payload_size_bias = 0.0;
+        self.payload_structure_bias = 0.0;
+        self.payload_numeric_bias = 0.0;
+
+        self.valve_forward = 0.0;
+        self.valve_reverse = 0.0;
+        self.valve_oscillation = 0.0;
+
+        self.metrics.load = 0.0;
+        self.metrics.stability_score = 1.0;
+        self.locality_score = 0.0;
+        self.tunnel_bias = 0.0;
+        self.tunnel_reliability = 1.0;
+
+        for delta_id in &view.delta_ids {
+            if let Some(delta) = store.deltas.iter().find(|d| d.id == *delta_id) {
+                self.apply_delta(delta);
+            }
+        }
+    }
+
+    pub fn rollback_to(&mut self, master_id: usize, store: &DeltaStore, target_seq: u64) {
+        // Reset then replay deltas up to target_seq
+        self.payload_entropy_bias = 0.0;
+        self.payload_size_bias = 0.0;
+        self.payload_structure_bias = 0.0;
+        self.payload_numeric_bias = 0.0;
+
+        self.valve_forward = 0.0;
+        self.valve_reverse = 0.0;
+        self.valve_oscillation = 0.0;
+
+        self.metrics.load = 0.0;
+        self.metrics.stability_score = 1.0;
+        self.locality_score = 0.0;
+        self.tunnel_bias = 0.0;
+        self.tunnel_reliability = 1.0;
+        self.is_tunnel = false;
+
+        let deltas = store.deltas_for_master(master_id);
+        for d in deltas {
+            if d.seq <= target_seq {
+                self.apply_delta(d);
+            }
+        }
+    }
+
+    pub fn switch_view(&mut self, view_idx: usize, store: &DeltaStore) {
+        if let Some(view) = store.get_view(view_idx) {
+            self.apply_effective_view(view, store);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Structure‑aware scoring
     // -------------------------------------------------------------------------
 
     pub fn update_structure_biases(&mut self, req: &super::request::HbmRequest) {
@@ -162,7 +265,7 @@ impl HbmChannel {
     }
 
     // -------------------------------------------------------------------------
-    // NEW: Tesla valve coupling from request to channel
+    // Tesla valve coupling from request to channel
     // -------------------------------------------------------------------------
 
     pub fn update_valve_from_request(&mut self, req: &super::request::HbmRequest) {
@@ -585,7 +688,6 @@ impl HbmChannel {
             self.metrics.locality_score * 0.05;
         heatmap.add_bitdrop_locality_heat(ch, locality_heat);
 
-        // Tesla valve directional heat coupling
         let vf_heat = self.valve_forward * -0.05;
         let vr_heat = self.valve_reverse * 0.06;
         let vo_heat = self.valve_oscillation * 0.08;
@@ -606,4 +708,5 @@ impl HbmChannel {
         }
     }
 }
+
 

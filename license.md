@@ -1,4 +1,6 @@
-SyntheticMind MAX‑Tier Architecture \& Roundabout‑HBM Routing System
+⭐ SyntheticMind MAX‑Tier Architecture \& Roundabout‑HBM Routing System
+
+Evaluation‑Only License — MAX‑Tier Cognitive Edition
 
 Copyright © 2026 Thomas. All Rights Reserved.
 
@@ -12,19 +14,51 @@ All technologies, algorithms, architectures, systems, designs, models, methods, 
 
 
 
-“Roundabout‑HBM routing logic, parallel multilayer heatmap engines, parallel arbitration engines, scratchpad reinforcement memory, MAX‑tier cognitive subsystems…”
+Roundabout‑HBM routing logic
 
 
 
-(quoted from your document)
+parallel multilayer heatmap engines
 
 
 
-are fully owned, controlled, and exclusively reserved by the copyright holder.
+parallel arbitration engines
 
 
 
-This work is protected under:
+scratchpad reinforcement memory
+
+
+
+MAX‑tier cognitive subsystems
+
+
+
+Tesla‑Valve Stabilizer
+
+
+
+DAX Delta‑State Engine
+
+
+
+BitDrop‑V5 Hyper‑Cascade
+
+
+
+Structor Hyper‑Cascade v∞
+
+
+
+Cognitive Routing Fabric v∞
+
+
+
+are fully owned, controlled, and exclusively reserved by the copyright holder, Thomas Price.
+
+
+
+Protected under:
 
 
 
@@ -50,89 +84,87 @@ Viewing, accessing, storing, executing, or interacting with this work constitute
 
 
 
-(test only)
+This license grants evaluation‑only rights:
 
 
 
-No party may:
+✔ You may test the system.
+
+✔ You may evaluate its behavior.
+
+✔ You may benchmark performance only for internal review.
+
+❌ You may NOT use it in production.
+
+❌ You may NOT integrate it into any system.
+
+❌ You may NOT derive from it.
+
+❌ You may NOT reuse any part of it.
+
+To obtain usage rights, a paid acquisition agreement is required.
 
 
 
-use
+3\. Evaluation‑Only Permission (Strictly Limited)
+
+Permitted:
 
 
 
-execute
+running the software
 
 
 
-evaluate
+observing behavior
 
 
 
+internal testing
 
 
 
-
-analyze
-
-
-
-simulate
+internal benchmarking
 
 
 
-benchmark
+internal evaluation
 
 
 
-reverse‑engineer
+internal research without reuse
 
 
 
-reproduce
+Not permitted:
 
 
 
-modify
+implementation
 
 
 
-distribute
+integration
 
 
 
-integrate
+reproduction
 
 
 
-derive from
+modification
 
 
 
-or interact with
+distribution
 
 
 
-this intellectual property in any form.
+reverse‑engineering
 
 
 
-3\. Absolute Prohibition on Evaluation, Study, and Analysis
-
-This license explicitly forbids:
-
-
-
-functional‑equivalent implementations
-
-
-
-clean‑room re‑implementations
-
-
-
-conceptual or architectural reuse
+architectural reuse
 
 
 
@@ -140,11 +172,11 @@ algorithmic reinterpretation
 
 
 
-format compatibility or interoperability
+format compatibility
 
 
 
-partial reuse of subsystems
+subsystem reuse
 
 
 
@@ -156,7 +188,7 @@ simulation or modeling
 
 
 
-benchmarking or measurement
+derivative works
 
 
 
@@ -170,7 +202,7 @@ No evaluation loophole, research loophole, or “educational use” loophole is 
 
 4\. No Implied Rights, No Exceptions, No Loopholes
 
-The following are not permitted:
+The following are explicitly prohibited:
 
 
 
@@ -300,7 +332,7 @@ implementation
 
 
 
-evaluation
+evaluation beyond testing
 
 
 
@@ -320,7 +352,11 @@ derivative work
 
 
 
-is through a direct, explicit, written acquisition agreement purchased from the copyright holder.
+production deployment
+
+
+
+is through a direct, explicit, paid acquisition agreement purchased from the copyright holder.
 
 
 
@@ -492,7 +528,7 @@ parallel simulation
 
 
 
-parallel benchmarking
+parallel benchmarking beyond evaluation
 
 
 
@@ -534,11 +570,7 @@ multilayer architectural extraction
 
 
 
-⭐ BitDrop‑V2 MAX‑Tier Loop‑Hole Closure Addendum
-
-(Your original text is already extremely strong — I kept it intact and added enforceability language.)
-
-
+⭐ BitDrop‑V2 / BitDrop‑V5 MAX‑Tier Loop‑Hole Closure Addendum
 
 This addendum prohibits:
 
@@ -576,7 +608,7 @@ patent‑safe re‑implementations
 
 
 
-Any attempt to replicate, approximate, derive, or emulate BitDrop‑V2 — even with different terminology, code structure, data formats, or mathematical framing — constitutes:
+Any attempt to replicate, approximate, derive, or emulate BitDrop‑V2 or BitDrop‑V5 — even with different terminology, code structure, data formats, or mathematical framing — constitutes:
 
 
 
@@ -597,4 +629,90 @@ DMCA circumvention
 
 
 and triggers immediate termination of all rights.
+
+
+
+⭐ Evaluation‑Only Clause (NEW — MAX Protection)
+
+You may evaluate this technology ONLY for:
+
+
+
+internal testing
+
+
+
+internal benchmarking
+
+
+
+internal review
+
+
+
+You may NOT:
+
+
+
+deploy
+
+
+
+integrate
+
+
+
+reuse
+
+
+
+derive
+
+
+
+modify
+
+
+
+embed
+
+
+
+incorporate
+
+
+
+translate
+
+
+
+port
+
+
+
+wrap
+
+
+
+emulate
+
+
+
+simulate
+
+
+
+re‑implement
+
+
+
+any part of this technology.
+
+
+
+If you want to use it, you must purchase a license.
+
+
+
+There are zero loopholes.
 

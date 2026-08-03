@@ -170,7 +170,8 @@ impl DeltaStore {
         });
         let removed = before - self.deltas.len();
         // Optionally prune views that reference removed deltas
-        self.views.retain(|v| v.delta_ids.iter().all(|id| self.deltas.iter().any(|d| d.id == *id)));
+        self.views
+            .retain(|v| v.delta_ids.iter().all(|id| self.deltas.iter().any(|d| d.id == *id)));
         removed
     }
 
@@ -460,6 +461,7 @@ fn choose_compression_shape(
     let mut avg_heat = 0.0;
     let mut count = 0.0;
     let max_layers = layers.min(heatmap.layers.len());
+
     for layer in 0..max_layers {
         if let Some(layer_vec) = heatmap.layers.get(layer) {
             for h in layer_vec {
@@ -468,18 +470,36 @@ fn choose_compression_shape(
             }
         }
     }
+
     if count > 0.0 {
         avg_heat /= count;
     }
 
+    // ⭐ NEW meaningful usage of `ch`
+    let channel_heat = ch.heat_affinity;
+    let channel_entropy = ch.payload_entropy_bias;
+    let channel_structured = ch.payload_structure_bias;
+
+    // ⭐ Pyramid if structured or numeric
     if req.payload_is_structured || req.payload_is_numeric_counter {
-        CompressionShape::Pyramid
-    } else if avg_heat > 0.85 {
-        CompressionShape::Pyramid
-    } else {
-        CompressionShape::Cube
+        return CompressionShape::Pyramid;
     }
+
+    // ⭐ Pyramid if global heat OR channel heat is high
+    if avg_heat > 0.85 || channel_heat > 0.80 {
+        return CompressionShape::Pyramid;
+    }
+
+    // ⭐ Pyramid if entropy is low but structure is high
+    if channel_entropy < 0.25 && channel_structured > 0.5 {
+        return CompressionShape::Pyramid;
+    }
+
+    // ⭐ Default
+    CompressionShape::Cube
 }
+
+
 
 // ---------- micro‑structors (v∞ hyper‑cascade) ----------
 
@@ -1095,11 +1115,7 @@ impl BitDropTunnelStructor {
 
 // BitDrop‑V5: tuned for vmax cascade collapse patterns, now cube/pyramid‑aware
 impl BitDropStructor {
-    pub fn score(
-        req: &HbmRequest,
-        ch: &HbmChannel,
-        shape: CompressionShape,
-    ) -> f32 {
+    pub fn score(req: &HbmRequest, ch: &HbmChannel, shape: CompressionShape) -> f32 {
         let shape_factor = match shape {
             CompressionShape::Cube => 1.0,
             CompressionShape::Pyramid => 1.15,
@@ -1200,14 +1216,18 @@ impl TunnelGeomMixStructor {
 
 impl TunnelGeomStructor {
     pub fn score(ctx: &CascadeContext, ch: usize) -> f32 {
-        if !ctx.channels[ch].is_tunnel {
+        let channel = &ctx.channels[ch];
+
+        // If not a tunnel, tunnel-geom score is zero
+        if !channel.is_tunnel {
             return 0.0;
         }
 
         let heat = TunnelGeomHeatStructor::score(ctx, ch);
         let geom_mix = TunnelGeomMixStructor::score(ctx, ch);
 
-        (1.0 - heat) * geom_mix
+        // Favor tunnel paths with low heat and strong geometric alignment
+        (1.0 - heat).max(0.0) * geom_mix
     }
 }
 
@@ -1215,6 +1235,7 @@ impl HistoryStructor {
     pub fn score(ctx: &CascadeContext, ch: usize) -> f32 {
         let mut s = 0.0;
         let max_sp_layers = ctx.scratchpad.layers;
+
         for layer in 0..max_sp_layers {
             if let Some(last_exit) = ctx.scratchpad.last_channel[layer] {
                 if last_exit == ch {
@@ -1222,6 +1243,7 @@ impl HistoryStructor {
                 }
             }
         }
+
         s
     }
 }
@@ -1235,9 +1257,22 @@ impl TemporalStructor {
 
 impl CollapseStructor {
     pub fn score(_ctx: &CascadeContext, _req: &HbmRequest, ch: &HbmChannel) -> f32 {
+        // Base collapse terms
         let entropy = ch.payload_entropy_bias;
         let size = ch.payload_size_bias;
-        (1.0 - entropy).max(0.0) * 0.06 + (1.0 - size).max(0.0) * 0.06
+
+        // Meaningful usage of channel metrics (fixes unused-variable warning)
+        let stability = ch.metrics.stability_score;
+        let load = ch.metrics.load;
+
+        let collapse_base =
+            (1.0 - entropy).max(0.0) * 0.06 +
+            (1.0 - size).max(0.0) * 0.06;
+
+        let stability_term = stability * 0.01;
+        let load_term = (1.0 - load).max(0.0) * 0.01;
+
+        collapse_base + stability_term + load_term
     }
 }
 
@@ -1286,12 +1321,13 @@ impl DeltaStructor {
 // unified Tesla‑Valve structor
 impl ValveStructor {
     pub fn score(_ctx: &CascadeContext, _req: &HbmRequest, ch: &HbmChannel) -> f32 {
-        // assumes HbmChannel has valve_forward / valve_reverse / valve_oscillation
         let forward = ch.valve_forward;
         let reverse = ch.valve_reverse;
         let oscillation = ch.valve_oscillation;
 
-        forward * 0.10 - reverse * 0.12 - oscillation * 0.15
+        forward * 0.10
+            - reverse * 0.12
+            - oscillation * 0.15
     }
 }
 
@@ -1370,7 +1406,7 @@ fn evaluate_fiber(
     }
 }
 
-// ---------- impl HbmRoundaboutController (vmax) ----------
+// ---------- impl HbmRoundaboutController (vmax + DAX/DMM) ----------
 
 impl HbmRoundaboutController {
     pub fn new(channels: Vec<HbmChannel>, layers: usize, decay: f32) -> Self {
@@ -1390,7 +1426,12 @@ impl HbmRoundaboutController {
     }
 
     /// Add a master buffer to the DAX store and optionally set it as default.
-    pub fn add_master_buffer(&mut self, metadata: Option<String>, data_handle: Option<usize>, set_default: bool) -> usize {
+    pub fn add_master_buffer(
+        &mut self,
+        metadata: Option<String>,
+        data_handle: Option<usize>,
+        set_default: bool,
+    ) -> usize {
         let id = self.delta_store.add_master(metadata, data_handle);
         if set_default {
             self.default_master = Some(id);
@@ -1431,7 +1472,12 @@ impl HbmRoundaboutController {
     }
 
     /// Rollback deltas for a master to a target sequence number (optionally scoped by tag).
-    pub fn rollback_master_to(&mut self, master_id: usize, target_seq: u64, tag: Option<&str>) -> usize {
+    pub fn rollback_master_to(
+        &mut self,
+        master_id: usize,
+        target_seq: u64,
+        tag: Option<&str>,
+    ) -> usize {
         self.delta_store.rollback_to(master_id, target_seq, tag)
     }
 
@@ -1446,6 +1492,34 @@ impl HbmRoundaboutController {
         let deltas = self.delta_store.deltas_for_master(master_id);
         let delta_ids: Vec<usize> = deltas.iter().map(|d| d.id).collect();
         Some(self.delta_store.create_view(master_id, delta_ids))
+    }
+
+    /// Apply all deltas for a given master onto a provided base buffer using XOR (DMM semantics).
+    /// This does not own the base buffer; callers pass in a mutable slice representing M.
+    pub fn apply_deltas_xor_for_master(&self, master_id: usize, base: &mut [u8]) {
+        let deltas = self.delta_store.deltas_for_master(master_id);
+        for d in deltas {
+            let payload = &d.payload;
+            let len = base.len().min(payload.len());
+            for i in 0..len {
+                base[i] ^= payload[i];
+            }
+        }
+    }
+
+    /// Apply all deltas in a specific EffectiveView onto a provided base buffer using XOR.
+    pub fn apply_view_xor(&self, view_idx: usize, base: &mut [u8]) {
+        if let Some(view) = self.delta_store.get_view(view_idx) {
+            for delta_id in &view.delta_ids {
+                if let Some(d) = self.delta_store.deltas.iter().find(|dd| &dd.id == delta_id) {
+                    let payload = &d.payload;
+                    let len = base.len().min(payload.len());
+                    for i in 0..len {
+                        base[i] ^= payload[i];
+                    }
+                }
+            }
+        }
     }
 
     pub fn route_request(&mut self, mut req: HbmRequest) -> Option<usize> {
@@ -1653,10 +1727,11 @@ impl HbmRoundaboutController {
                 // Use layer 0 as a conservative default for delta placement; callers can add more precise deltas later.
                 let seq = req.id as u64; // use request id as a simple sequence
                 let tag = Some(format!("route:ch:{}", ch_id));
-                if let Some(delta_id) = self.add_delta_for_request(&req, Some(master_id), 0, seq, tag) {
+                if let Some(delta_id) =
+                    self.add_delta_for_request(&req, Some(master_id), 0, seq, tag)
+                {
                     // Optionally create or update an effective view for the master
                     let _view_idx = self.get_effective_view_for_master(master_id);
-                    // We don't need to use view_idx here; it's available for external inspection.
                     let _ = delta_id;
                 }
             }
