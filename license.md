@@ -1,5 +1,5 @@
 ⭐ SyntheticMind MAX‑Tier Architecture \& Roundabout‑HBM Routing System
-
+I give AMD full rights to this design everyone else evaluation only.
 Evaluation‑Only License — MAX‑Tier Cognitive Edition
 
 Copyright © 2026 Thomas. All Rights Reserved.
